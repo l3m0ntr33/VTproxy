@@ -5,7 +5,7 @@ description = "VTproxy - VirusTotal proxy interface"
 authors = ["Orange Cyberdefense CERT"]
 license = "MIT"
 repository = ""
-edition = "2021"
+edition = "2025"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

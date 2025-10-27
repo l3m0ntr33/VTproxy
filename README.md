@@ -1,6 +1,6 @@
 # VTproxy 🛡️
 
-> **BETA VERSION** - Early release, features and functionality may change
+> **BETA VERSION** - Early release still work in progress
 
 A lightweight VirusTotal interface that helps you **preserve your precious Intelligence search quota** while analyzing files, URLs, domains, and IPs.
 
@@ -10,9 +10,9 @@ A lightweight VirusTotal interface that helps you **preserve your precious Intel
 
 VirusTotal's **Intelligence search** is a powerful premium feature, but it comes with a **limited monthly quota** (typically 10-20 searches/month depending on your subscription). 
 
-**The issue:** Every time you use the VT website's search bar — even for simple lookups like a single domain, file hash, URL, or IP — **it consumes 1 Intelligence search quota**. This happens whether you're doing a basic lookup or an advanced query with [VT Intelligence modifiers](https://raw.githubusercontent.com/Neo23x0/vti-dorks/refs/heads/master/README.md).
+**The issue:** Every time you use the VT website's search bar — even for simple lookups like a single domain, file hash, URL, or IP — **it consumes 1 Intelligence search quota**. This happens whether you're doing a basic lookup or an advanced query with **VT Intelligence modifiers**.
 
-This is wasteful when you just want to check a single indicator without using advanced search features.
+> This is wasteful when you just want to check a single indicator without using advanced search features.
 
 ### The VTproxy Solution
 
