@@ -1166,6 +1166,93 @@
 }
 
 /* ==========================================
+   Contacted Domains & IPs Tables
+   ========================================== */
+
+.contacted-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    table-layout: fixed;
+}
+
+.contacted-table thead {
+    background: var(--bg-tertiary);
+    border-bottom: 2px solid var(--border-color);
+}
+
+.contacted-table th {
+    padding: var(--spacing-sm) var(--spacing-md);
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 0.813rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.contacted-table td {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+.contacted-table tbody tr:hover {
+    background: var(--bg-hover);
+}
+
+.contacted-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.domain-link,
+.ip-link {
+    color: var(--text-primary);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.domain-link:hover,
+.ip-link:hover {
+    color: var(--orange-primary);
+    text-decoration: underline;
+}
+
+.ip-link {
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+}
+
+.contacted-table .detections {
+    font-weight: 600;
+}
+
+/* Column widths for better distribution */
+.contacted-table th:nth-child(1),
+.contacted-table td:nth-child(1) {
+    width: 25%;
+}
+
+.contacted-table th:nth-child(2),
+.contacted-table td:nth-child(2) {
+    width: 12%;
+}
+
+.contacted-table th:nth-child(3),
+.contacted-table td:nth-child(3) {
+    width: 13%;
+}
+
+.contacted-table th:nth-child(4),
+.contacted-table td:nth-child(4) {
+    width: 25%;
+}
+
+.contacted-table th:nth-child(5),
+.contacted-table td:nth-child(5) {
+    width: 25%;
+}
+
+/* ==========================================
    Telemetry - Submission History
    ========================================== */
 
@@ -1249,6 +1336,7 @@
 .table-wrapper {
     overflow-x: auto;
     margin-top: var(--spacing-md);
+    width: 100%;
 }
 
 /* ==========================================

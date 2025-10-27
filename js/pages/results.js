@@ -1028,6 +1028,22 @@ function renderRelationsTab() {
         'Premium feature: Files that communicate with this URL'
     );
     
+    // 6. Contacted Domains (lazy load section)
+    sectionsHtml += renderLazyLoadSection(
+        'contacted-domains',
+        'Contacted Domains',
+        'Load contacted domains',
+        'Premium feature: Domains from which this URL loads resources'
+    );
+    
+    // 7. Contacted IPs (lazy load section)
+    sectionsHtml += renderLazyLoadSection(
+        'contacted-ips',
+        'Contacted IPs',
+        'Load contacted IPs',
+        'Premium feature: IP addresses from which this URL loads resources'
+    );
+    
     return sectionsHtml;
 }
 
@@ -1317,6 +1333,164 @@ function renderFilesTable(files, showDownloadContext = false) {
     }).join('');
     
     return `<div class="relation-list">${rows}</div>`;
+}
+
+/**
+ * Render contacted domains table
+ */
+function renderContactedDomainsTable(domains, totalCount) {
+    const analysisDate = currentData.attributes.last_analysis_date;
+    const contactedDate = analysisDate ? 
+        new Date(analysisDate * 1000).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC') :
+        '-';
+    
+    const rows = domains.map(domainObj => {
+        const attrs = domainObj.attributes || {};
+        const stats = attrs.last_analysis_stats || {};
+        
+        // Calculate detection ratio
+        const malicious = stats.malicious || 0;
+        const total = Object.values(stats).reduce((sum, val) => sum + (val || 0), 0);
+        
+        // Determine status class
+        let statusClass = 'status-clean';
+        if (malicious > 5) statusClass = 'status-malicious';
+        else if (malicious > 0) statusClass = 'status-suspicious';
+        
+        // Format creation date
+        const creationDate = attrs.creation_date ? 
+            new Date(attrs.creation_date * 1000).toISOString().split('T')[0] :
+            '-';
+        
+        // Get registrar
+        const registrar = attrs.registrar || 'Unknown';
+        
+        return `
+            <tr>
+                <td>
+                    <a href="result.html?type=domain&id=${encodeURIComponent(domainObj.id)}" class="domain-link">
+                        ${escapeHtml(domainObj.id)}
+                    </a>
+                </td>
+                <td>
+                    <span class="detections ${statusClass}">${malicious} / ${total}</span>
+                </td>
+                <td>${escapeHtml(creationDate)}</td>
+                <td title="${escapeHtml(registrar)}">${escapeHtml(registrar.length > 30 ? registrar.substring(0, 30) + '...' : registrar)}</td>
+                <td>${escapeHtml(contactedDate)}</td>
+            </tr>
+        `;
+    }).join('');
+    
+    return `
+        <p class="text-muted" style="margin-bottom: 1rem;">
+            Showing ${domains.length} of ${totalCount} domains
+        </p>
+        <div class="table-wrapper">
+            <table class="contacted-table">
+                <thead>
+                    <tr>
+                        <th>Domain</th>
+                        <th>Detections</th>
+                        <th>Created</th>
+                        <th>Registrar</th>
+                        <th>Contacted date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+/**
+ * Render contacted IPs table
+ */
+function renderContactedIpsTable(ips, totalCount) {
+    const analysisDate = currentData.attributes.last_analysis_date;
+    const contactedDate = analysisDate ? 
+        new Date(analysisDate * 1000).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC') :
+        '-';
+    
+    const rows = ips.map(ipObj => {
+        const attrs = ipObj.attributes || {};
+        const stats = attrs.last_analysis_stats || {};
+        
+        // Calculate detection ratio
+        const malicious = stats.malicious || 0;
+        const total = Object.values(stats).reduce((sum, val) => sum + (val || 0), 0);
+        
+        // Determine status class
+        let statusClass = 'status-clean';
+        if (malicious > 5) statusClass = 'status-malicious';
+        else if (malicious > 0) statusClass = 'status-suspicious';
+        
+        // Get ASN
+        const asn = attrs.asn || '-';
+        const asOwner = attrs.as_owner || 'Unknown';
+        const asnDisplay = asn !== '-' ? asn : '-';
+        const asnTooltip = asn !== '-' ? `AS${asn} - ${asOwner}` : 'Unknown';
+        
+        // Get country with flag
+        const countryCode = attrs.country || null;
+        const countryDisplay = countryCode ? 
+            `${getCountryFlag(countryCode)} ${countryCode}` :
+            '-';
+        const countryTooltip = countryCode ? getCountryName(countryCode) : 'Unknown';
+        
+        return `
+            <tr>
+                <td>
+                    <a href="result.html?type=ip&id=${encodeURIComponent(ipObj.id)}" class="ip-link">
+                        ${escapeHtml(ipObj.id)}
+                    </a>
+                </td>
+                <td>
+                    <span class="detections ${statusClass}">${malicious} / ${total}</span>
+                </td>
+                <td title="${escapeHtml(asnTooltip)}">${asnDisplay}</td>
+                <td title="${escapeHtml(countryTooltip)}">${countryDisplay}</td>
+                <td>${escapeHtml(contactedDate)}</td>
+            </tr>
+        `;
+    }).join('');
+    
+    return `
+        <p class="text-muted" style="margin-bottom: 1rem;">
+            Showing ${ips.length} of ${totalCount} IPs
+        </p>
+        <div class="table-wrapper">
+            <table class="contacted-table">
+                <thead>
+                    <tr>
+                        <th>IP</th>
+                        <th>Detections</th>
+                        <th>Autonomous system</th>
+                        <th>Country</th>
+                        <th>Contacted date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+/**
+ * Get country name from code
+ */
+function getCountryName(countryCode) {
+    const countryNames = {
+        'US': 'United States', 'CN': 'China', 'RU': 'Russia', 'IN': 'India',
+        'BR': 'Brazil', 'DE': 'Germany', 'FR': 'France', 'GB': 'United Kingdom',
+        'JP': 'Japan', 'CA': 'Canada', 'AU': 'Australia', 'KR': 'South Korea'
+        // Add more as needed
+    };
+    return countryNames[countryCode] || countryCode;
 }
 
 /**
@@ -1687,6 +1861,118 @@ window.loadCommunicatingFiles = async function() {
         }
         
         showToast('Failed to load files', 'error');
+    }
+}
+
+/**
+ * Load contacted domains
+ */
+window.loadContactedDomains = async function() {
+    const contentDiv = document.getElementById('contacted-domains-content');
+    const titleElement = document.getElementById('contacted-domains-title');
+    if (!contentDiv) return;
+    
+    // Show loading state
+    contentDiv.innerHTML = '<div class="loading-spinner" style="margin: 2rem auto;"></div><p class="text-muted text-center">Loading contacted domains...</p>';
+    
+    try {
+        const response = await vtClient.getUrlRelationship(currentId, 'contacted_domains', 10);
+        const domains = response.data || [];
+        const totalCount = response.meta?.count || domains.length;
+        
+        // Update title with count
+        if (titleElement) {
+            titleElement.textContent = `Contacted Domains (${domains.length}${totalCount > domains.length ? '/' + totalCount : ''})`;
+        }
+        
+        // Render results
+        if (domains.length === 0) {
+            contentDiv.innerHTML = createEmptyState('No contacted domains found');
+            return;
+        }
+        
+        contentDiv.innerHTML = renderContactedDomainsTable(domains, totalCount);
+        
+        showToast(`Loaded ${domains.length} domains`, 'success');
+        
+    } catch (error) {
+        console.error('Error loading contacted domains:', error);
+        
+        // Handle premium feature error
+        if (error.message.includes('premium') || error.message.includes('forbidden')) {
+            contentDiv.innerHTML = `
+                <div class="error-message">
+                    <p><strong>Premium Feature</strong></p>
+                    <p>This feature requires a Premium VirusTotal API key.</p>
+                </div>
+            `;
+        } else {
+            contentDiv.innerHTML = `
+                <div class="error-message">
+                    <p><strong>Error</strong></p>
+                    <p>${escapeHtml(error.message)}</p>
+                    <button class="btn-secondary" onclick="loadContactedDomains()" style="margin-top: 1rem;">Retry</button>
+                </div>
+            `;
+        }
+        
+        showToast('Failed to load contacted domains', 'error');
+    }
+}
+
+/**
+ * Load contacted IPs
+ */
+window.loadContactedIps = async function() {
+    const contentDiv = document.getElementById('contacted-ips-content');
+    const titleElement = document.getElementById('contacted-ips-title');
+    if (!contentDiv) return;
+    
+    // Show loading state
+    contentDiv.innerHTML = '<div class="loading-spinner" style="margin: 2rem auto;"></div><p class="text-muted text-center">Loading contacted IPs...</p>';
+    
+    try {
+        const response = await vtClient.getUrlRelationship(currentId, 'contacted_ips', 10);
+        const ips = response.data || [];
+        const totalCount = response.meta?.count || ips.length;
+        
+        // Update title with count
+        if (titleElement) {
+            titleElement.textContent = `Contacted IPs (${ips.length}${totalCount > ips.length ? '/' + totalCount : ''})`;
+        }
+        
+        // Render results
+        if (ips.length === 0) {
+            contentDiv.innerHTML = createEmptyState('No contacted IPs found');
+            return;
+        }
+        
+        contentDiv.innerHTML = renderContactedIpsTable(ips, totalCount);
+        
+        showToast(`Loaded ${ips.length} IPs`, 'success');
+        
+    } catch (error) {
+        console.error('Error loading contacted IPs:', error);
+        
+        // Handle premium feature error
+        if (error.message.includes('premium') || error.message.includes('forbidden')) {
+            contentDiv.innerHTML = `
+                <div class="error-message">
+                    <p><strong>Premium Feature</strong></p>
+                    <p>This feature requires a Premium VirusTotal API key.</p>
+                </div>
+            `;
+        } else {
+            contentDiv.innerHTML = `
+                <div class="error-message">
+                    <p><strong>Error</strong></p>
+                    <p>${escapeHtml(error.message)}</p>
+                    <button class="btn-secondary" onclick="loadContactedIps()" style="margin-top: 1rem;">Retry</button>
+                </div>
+            `;
+        }
+        
+        showToast('Failed to load contacted IPs', 'error');
     }
 }
 
