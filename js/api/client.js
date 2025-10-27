@@ -195,6 +195,16 @@ export class VTClient {
         return this.fetch(`/urls/${urlId}/${relationship}?limit=${limit}`);
     }
     
+    /**
+     * Get URL submission history
+     * @param {string} urlId - URL ID
+     * @param {number} limit - Number of submissions
+     * @returns {Promise<Object>} Submissions data
+     */
+    async getUrlSubmissions(urlId, limit = 40) {
+        return this.fetch(`/urls/${urlId}/submissions?limit=${limit}`);
+    }
+    
     // ==================== Domain Endpoints ====================
     
     /**

@@ -451,6 +451,7 @@ function getTabsForType() {
         return [
             ...baseTabs,
             { id: 'relations', label: 'Relations', content: renderRelationsTab() },
+            { id: 'telemetry', label: 'Telemetry', content: renderTelemetryTab() },
             { id: 'content', label: 'Content', content: renderContentTab() },
             communityTab
         ];
@@ -1338,6 +1339,73 @@ function renderContentTab() {
 }
 
 /**
+ * Render telemetry tab content (URLs only)
+ */
+function renderTelemetryTab() {
+    if (currentType !== 'url') {
+        return createEmptyState('Telemetry is only available for URLs');
+    }
+    
+    const attrs = currentData.attributes;
+    
+    // Summary cards
+    const firstSeenDate = attrs.first_submission_date ? 
+        new Date(attrs.first_submission_date * 1000).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC') :
+        'Unknown';
+    
+    const lastSeenDate = attrs.last_submission_date ? 
+        new Date(attrs.last_submission_date * 1000).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC') :
+        'Unknown';
+    
+    const totalSubmissions = attrs.times_submitted || 0;
+    
+    return `
+        <div class="telemetry-summary">
+            <div class="telemetry-card">
+                <div class="telemetry-label">
+                    First seen
+                    <span class="info-icon" title="Date when this URL was first submitted to VirusTotal">ℹ️</span>
+                </div>
+                <div class="telemetry-value">${escapeHtml(firstSeenDate)}</div>
+                <div class="telemetry-meta" id="first-seen-region"></div>
+            </div>
+            <div class="telemetry-card">
+                <div class="telemetry-label">
+                    Last seen
+                    <span class="info-icon" title="Date when this URL was most recently submitted">ℹ️</span>
+                </div>
+                <div class="telemetry-value">${escapeHtml(lastSeenDate)}</div>
+                <div class="telemetry-meta" id="last-seen-region"></div>
+            </div>
+            <div class="telemetry-card">
+                <div class="telemetry-label">
+                    Total submissions
+                    <span class="info-icon" title="Number of times this URL was submitted for analysis">ℹ️</span>
+                </div>
+                <div class="telemetry-value">${totalSubmissions}</div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Submissions</h3>
+            </div>
+            <div class="card-body">
+                <div id="submissions-content">
+                    <p class="text-muted" style="margin-bottom: 1rem;">Uploads of this file being studied. Reanalysis requests do not generate a submission.</p>
+                    <button class="btn-secondary" onclick="loadSubmissionsData()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 5v14M5 12l7 7 7-7"></path>
+                        </svg>
+                        Load submission history
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
  * Render community tab content
  */
 function renderCommunityTab() {
@@ -2139,6 +2207,223 @@ function renderBehaviorContent(behavior) {
         ${httpSection}
         ${filesSection}
         ${processSection}
+    `;
+}
+
+/**
+ * Load submissions data on demand
+ */
+window.loadSubmissionsData = async function() {
+    const container = document.getElementById('submissions-content');
+    if (!container) return;
+    
+    // Show loading state
+    container.innerHTML = '<div class="loading-spinner" style="margin: 2rem auto;"></div><p class="text-muted text-center">Loading submission history...</p>';
+    
+    try {
+        const response = await vtClient.getUrlSubmissions(currentId, 40);
+        const submissions = response.data || [];
+        const totalCount = response.meta?.count || submissions.length;
+        
+        // Update region info in summary cards if available
+        if (submissions.length > 0) {
+            const firstSubmission = submissions[submissions.length - 1]; // Oldest
+            const lastSubmission = submissions[0]; // Most recent
+            
+            const firstRegion = formatRegion(firstSubmission.attributes);
+            const lastRegion = formatRegion(lastSubmission.attributes);
+            
+            const firstRegionEl = document.getElementById('first-seen-region');
+            const lastRegionEl = document.getElementById('last-seen-region');
+            
+            if (firstRegionEl) {
+                firstRegionEl.textContent = firstRegion.display;
+                firstRegionEl.title = firstRegion.tooltip;
+            }
+            if (lastRegionEl) {
+                lastRegionEl.textContent = lastRegion.display;
+                lastRegionEl.title = lastRegion.tooltip;
+            }
+        }
+        
+        // Render submissions table
+        if (submissions.length === 0) {
+            container.innerHTML = createEmptyState('No submission history available');
+            return;
+        }
+        
+        container.innerHTML = renderSubmissionsTable(submissions, totalCount);
+        
+        showToast(`Loaded ${submissions.length} submissions`, 'success');
+        
+    } catch (error) {
+        console.error('Error loading submissions:', error);
+        container.innerHTML = `
+            <div class="error-message">
+                <p><strong>Error</strong></p>
+                <p>${escapeHtml(error.message)}</p>
+                <button class="btn-secondary" onclick="loadSubmissionsData()" style="margin-top: 1rem;">Retry</button>
+            </div>
+        `;
+        showToast('Failed to load submissions', 'error');
+    }
+};
+
+/**
+ * Format region from submission attributes
+ * Returns object with display text and tooltip
+ */
+function formatRegion(attrs) {
+    const countryNames = {
+        'AF': 'AFGHANISTAN', 'AX': 'ÅLAND ISLANDS', 'AL': 'ALBANIA', 'DZ': 'ALGERIA',
+        'AS': 'AMERICAN SAMOA', 'AD': 'ANDORRA', 'AO': 'ANGOLA', 'AI': 'ANGUILLA',
+        'AQ': 'ANTARCTICA', 'AG': 'ANTIGUA AND BARBUDA', 'AR': 'ARGENTINA', 'AM': 'ARMENIA',
+        'AW': 'ARUBA', 'AU': 'AUSTRALIA', 'AT': 'AUSTRIA', 'AZ': 'AZERBAIJAN',
+        'BS': 'BAHAMAS', 'BH': 'BAHRAIN', 'BD': 'BANGLADESH', 'BB': 'BARBADOS',
+        'BY': 'BELARUS', 'BE': 'BELGIUM', 'BZ': 'BELIZE', 'BJ': 'BENIN',
+        'BM': 'BERMUDA', 'BT': 'BHUTAN', 'BO': 'BOLIVIA', 'BQ': 'BONAIRE',
+        'BA': 'BOSNIA AND HERZEGOVINA', 'BW': 'BOTSWANA', 'BV': 'BOUVET ISLAND', 'BR': 'BRAZIL',
+        'IO': 'BRITISH INDIAN OCEAN TERRITORY', 'BN': 'BRUNEI', 'BG': 'BULGARIA', 'BF': 'BURKINA FASO',
+        'BI': 'BURUNDI', 'CV': 'CABO VERDE', 'KH': 'CAMBODIA', 'CM': 'CAMEROON',
+        'CA': 'CANADA', 'KY': 'CAYMAN ISLANDS', 'CF': 'CENTRAL AFRICAN REPUBLIC', 'TD': 'CHAD',
+        'CL': 'CHILE', 'CN': 'CHINA', 'CX': 'CHRISTMAS ISLAND', 'CC': 'COCOS ISLANDS',
+        'CO': 'COLOMBIA', 'KM': 'COMOROS', 'CG': 'CONGO', 'CD': 'CONGO (DRC)',
+        'CK': 'COOK ISLANDS', 'CR': 'COSTA RICA', 'CI': 'CÔTE D\'IVOIRE', 'HR': 'CROATIA',
+        'CU': 'CUBA', 'CW': 'CURAÇAO', 'CY': 'CYPRUS', 'CZ': 'CZECHIA',
+        'DK': 'DENMARK', 'DJ': 'DJIBOUTI', 'DM': 'DOMINICA', 'DO': 'DOMINICAN REPUBLIC',
+        'EC': 'ECUADOR', 'EG': 'EGYPT', 'SV': 'EL SALVADOR', 'GQ': 'EQUATORIAL GUINEA',
+        'ER': 'ERITREA', 'EE': 'ESTONIA', 'SZ': 'ESWATINI', 'ET': 'ETHIOPIA',
+        'FK': 'FALKLAND ISLANDS', 'FO': 'FAROE ISLANDS', 'FJ': 'FIJI', 'FI': 'FINLAND',
+        'FR': 'FRANCE', 'GF': 'FRENCH GUIANA', 'PF': 'FRENCH POLYNESIA', 'TF': 'FRENCH SOUTHERN TERRITORIES',
+        'GA': 'GABON', 'GM': 'GAMBIA', 'GE': 'GEORGIA', 'DE': 'GERMANY',
+        'GH': 'GHANA', 'GI': 'GIBRALTAR', 'GR': 'GREECE', 'GL': 'GREENLAND',
+        'GD': 'GRENADA', 'GP': 'GUADELOUPE', 'GU': 'GUAM', 'GT': 'GUATEMALA',
+        'GG': 'GUERNSEY', 'GN': 'GUINEA', 'GW': 'GUINEA-BISSAU', 'GY': 'GUYANA',
+        'HT': 'HAITI', 'HM': 'HEARD ISLAND', 'VA': 'HOLY SEE', 'HN': 'HONDURAS',
+        'HK': 'HONG KONG', 'HU': 'HUNGARY', 'IS': 'ICELAND', 'IN': 'INDIA',
+        'ID': 'INDONESIA', 'IR': 'IRAN', 'IQ': 'IRAQ', 'IE': 'IRELAND',
+        'IM': 'ISLE OF MAN', 'IL': 'ISRAEL', 'IT': 'ITALY', 'JM': 'JAMAICA',
+        'JP': 'JAPAN', 'JE': 'JERSEY', 'JO': 'JORDAN', 'KZ': 'KAZAKHSTAN',
+        'KE': 'KENYA', 'KI': 'KIRIBATI', 'KP': 'NORTH KOREA', 'KR': 'SOUTH KOREA',
+        'KW': 'KUWAIT', 'KG': 'KYRGYZSTAN', 'LA': 'LAOS', 'LV': 'LATVIA',
+        'LB': 'LEBANON', 'LS': 'LESOTHO', 'LR': 'LIBERIA', 'LY': 'LIBYA',
+        'LI': 'LIECHTENSTEIN', 'LT': 'LITHUANIA', 'LU': 'LUXEMBOURG', 'MO': 'MACAO',
+        'MG': 'MADAGASCAR', 'MW': 'MALAWI', 'MY': 'MALAYSIA', 'MV': 'MALDIVES',
+        'ML': 'MALI', 'MT': 'MALTA', 'MH': 'MARSHALL ISLANDS', 'MQ': 'MARTINIQUE',
+        'MR': 'MAURITANIA', 'MU': 'MAURITIUS', 'YT': 'MAYOTTE', 'MX': 'MEXICO',
+        'FM': 'MICRONESIA', 'MD': 'MOLDOVA', 'MC': 'MONACO', 'MN': 'MONGOLIA',
+        'ME': 'MONTENEGRO', 'MS': 'MONTSERRAT', 'MA': 'MOROCCO', 'MZ': 'MOZAMBIQUE',
+        'MM': 'MYANMAR', 'NA': 'NAMIBIA', 'NR': 'NAURU', 'NP': 'NEPAL',
+        'NL': 'NETHERLANDS', 'NC': 'NEW CALEDONIA', 'NZ': 'NEW ZEALAND', 'NI': 'NICARAGUA',
+        'NE': 'NIGER', 'NG': 'NIGERIA', 'NU': 'NIUE', 'NF': 'NORFOLK ISLAND',
+        'MK': 'NORTH MACEDONIA', 'MP': 'NORTHERN MARIANA ISLANDS', 'NO': 'NORWAY', 'OM': 'OMAN',
+        'PK': 'PAKISTAN', 'PW': 'PALAU', 'PS': 'PALESTINE', 'PA': 'PANAMA',
+        'PG': 'PAPUA NEW GUINEA', 'PY': 'PARAGUAY', 'PE': 'PERU', 'PH': 'PHILIPPINES',
+        'PN': 'PITCAIRN', 'PL': 'POLAND', 'PT': 'PORTUGAL', 'PR': 'PUERTO RICO',
+        'QA': 'QATAR', 'RE': 'RÉUNION', 'RO': 'ROMANIA', 'RU': 'RUSSIA',
+        'RW': 'RWANDA', 'BL': 'SAINT BARTHÉLEMY', 'SH': 'SAINT HELENA', 'KN': 'SAINT KITTS AND NEVIS',
+        'LC': 'SAINT LUCIA', 'MF': 'SAINT MARTIN', 'PM': 'SAINT PIERRE AND MIQUELON', 'VC': 'SAINT VINCENT',
+        'WS': 'SAMOA', 'SM': 'SAN MARINO', 'ST': 'SÃO TOMÉ AND PRÍNCIPE', 'SA': 'SAUDI ARABIA',
+        'SN': 'SENEGAL', 'RS': 'SERBIA', 'SC': 'SEYCHELLES', 'SL': 'SIERRA LEONE',
+        'SG': 'SINGAPORE', 'SX': 'SINT MAARTEN', 'SK': 'SLOVAKIA', 'SI': 'SLOVENIA',
+        'SB': 'SOLOMON ISLANDS', 'SO': 'SOMALIA', 'ZA': 'SOUTH AFRICA', 'GS': 'SOUTH GEORGIA',
+        'SS': 'SOUTH SUDAN', 'ES': 'SPAIN', 'LK': 'SRI LANKA', 'SD': 'SUDAN',
+        'SR': 'SURINAME', 'SJ': 'SVALBARD', 'SE': 'SWEDEN', 'CH': 'SWITZERLAND',
+        'SY': 'SYRIA', 'TW': 'TAIWAN', 'TJ': 'TAJIKISTAN', 'TZ': 'TANZANIA',
+        'TH': 'THAILAND', 'TL': 'TIMOR-LESTE', 'TG': 'TOGO', 'TK': 'TOKELAU',
+        'TO': 'TONGA', 'TT': 'TRINIDAD AND TOBAGO', 'TN': 'TUNISIA', 'TR': 'TURKEY',
+        'TM': 'TURKMENISTAN', 'TC': 'TURKS AND CAICOS', 'TV': 'TUVALU', 'UG': 'UGANDA',
+        'UA': 'UKRAINE', 'AE': 'UNITED ARAB EMIRATES', 'GB': 'UNITED KINGDOM', 'US': 'UNITED STATES',
+        'UM': 'U.S. MINOR ISLANDS', 'UY': 'URUGUAY', 'UZ': 'UZBEKISTAN', 'VU': 'VANUATU',
+        'VE': 'VENEZUELA', 'VN': 'VIETNAM', 'VG': 'BRITISH VIRGIN ISLANDS', 'VI': 'U.S. VIRGIN ISLANDS',
+        'WF': 'WALLIS AND FUTUNA', 'EH': 'WESTERN SAHARA', 'YE': 'YEMEN', 'ZM': 'ZAMBIA',
+        'ZW': 'ZIMBABWE'
+    };
+    
+    if (attrs.country) {
+        const countryName = countryNames[attrs.country] || attrs.country.toUpperCase();
+        const flag = getCountryFlag(attrs.country);
+        const display = `${flag} ${countryName}`;
+        const tooltip = attrs.city ? `${countryName}, ${attrs.city}` : countryName;
+        return { display, tooltip };
+    } else {
+        return { display: 'UNKNOWN OR UNSPECIFIED', tooltip: 'Location data not available' };
+    }
+}
+
+/**
+ * Get country flag emoji
+ */
+function getCountryFlag(countryCode) {
+    if (!countryCode || countryCode.length !== 2) return '🌐';
+    
+    const codePoints = countryCode
+        .toUpperCase()
+        .split('')
+        .map(char => 127397 + char.charCodeAt());
+    return String.fromCodePoint(...codePoints);
+}
+
+/**
+ * Get interface icon
+ */
+function getInterfaceIcon(interfaceType) {
+    const icons = {
+        'api': '🔑',
+        'email': '📧',
+        'web': '🌐',
+        'browser_extension': '🧩',
+        'mobile': '📱'
+    };
+    return icons[interfaceType] || '📎';
+}
+
+/**
+ * Render submissions table
+ */
+function renderSubmissionsTable(submissions, totalCount) {
+    const rows = submissions.map(sub => {
+        const attrs = sub.attributes;
+        
+        // Format date
+        const date = new Date(attrs.date * 1000).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
+        
+        // Format region with tooltip
+        const regionData = formatRegion(attrs);
+        
+        // Format source
+        const icon = getInterfaceIcon(attrs.interface);
+        const source = `${icon} ${attrs.source_key}-${attrs.interface}`;
+        
+        return `
+            <tr>
+                <td>${escapeHtml(date)}</td>
+                <td title="${escapeHtml(regionData.tooltip)}">${regionData.display}</td>
+                <td style="text-align: center; color: var(--text-muted);">?</td>
+                <td>${escapeHtml(source)}</td>
+            </tr>
+        `;
+    }).join('');
+    
+    return `
+        <p class="text-muted" style="margin-bottom: 1rem;">
+            Showing ${submissions.length} of ${totalCount} submissions
+        </p>
+        <div class="table-wrapper">
+            <table class="submissions-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Region</th>
+                        <th>Name</th>
+                        <th>Source</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                </tbody>
+            </table>
+        </div>
     `;
 }
 
