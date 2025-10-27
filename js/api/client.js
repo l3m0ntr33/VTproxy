@@ -1,8 +1,14 @@
 /**
  * VirusTotal API v3 Client
+ * Works in both browser (localhost only) and Tauri desktop app
  */
 
 const BASE_URL = 'https://www.virustotal.com/api/v3';
+
+/**
+ * Check if running in Tauri desktop app
+ */
+const isTauri = () => typeof window !== 'undefined' && window.__TAURI__ !== undefined;
 
 /**
  * VirusTotal API Client
@@ -17,6 +23,13 @@ export class VTClient {
             throw new Error('API key is required');
         }
         this.apiKey = apiKey;
+        this.useTauri = isTauri();
+        
+        if (this.useTauri) {
+            console.log('🚀 Running in Tauri desktop app mode');
+        } else {
+            console.log('🌐 Running in browser mode (localhost only)');
+        }
     }
     
     /**
@@ -25,34 +38,14 @@ export class VTClient {
      * @returns {Promise<Object>} API response data
      */
     async fetch(endpoint) {
-        const url = `${BASE_URL}${endpoint}`;
-        
         try {
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'x-apikey': this.apiKey
-                }
-            });
-            
-            // Handle rate limiting
-            if (response.status === 429) {
-                throw new Error('API rate limit exceeded. Please wait a moment and try again.');
+            if (this.useTauri) {
+                // Use Tauri backend (no CORS issues!)
+                return await this.fetchViaTauri(endpoint);
+            } else {
+                // Use browser fetch (works only on localhost due to CORS)
+                return await this.fetchViaBrowser(endpoint);
             }
-            
-            // Handle other HTTP errors
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                
-                // Parse VT error response
-                if (errorData.error) {
-                    throw new Error(this.parseErrorMessage(errorData.error));
-                }
-                
-                throw new Error(`API request failed: ${response.status} ${response.statusText}`);
-            }
-            
-            return await response.json();
         } catch (error) {
             // Network errors or other fetch failures
             if (error.message.includes('Failed to fetch')) {
@@ -60,6 +53,73 @@ export class VTClient {
             }
             throw error;
         }
+    }
+    
+    /**
+     * Fetch using Tauri backend
+     * @param {string} endpoint - API endpoint
+     * @returns {Promise<Object>} API response data
+     */
+    async fetchViaTauri(endpoint) {
+        const { invoke } = window.__TAURI__.tauri;
+        
+        const response = await invoke('vt_fetch', {
+            endpoint: endpoint,
+            apiKey: this.apiKey
+        });
+        
+        // Handle rate limiting
+        if (response.status === 429) {
+            throw new Error('API rate limit exceeded. Please wait a moment and try again.');
+        }
+        
+        // Parse response body
+        const data = JSON.parse(response.body);
+        
+        // Handle HTTP errors
+        if (response.status >= 400) {
+            if (data.error) {
+                throw new Error(this.parseErrorMessage(data.error));
+            }
+            throw new Error(`API request failed: ${response.status}`);
+        }
+        
+        return data;
+    }
+    
+    /**
+     * Fetch using browser (localhost only)
+     * @param {string} endpoint - API endpoint
+     * @returns {Promise<Object>} API response data
+     */
+    async fetchViaBrowser(endpoint) {
+        const url = `${BASE_URL}${endpoint}`;
+        
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'x-apikey': this.apiKey
+            }
+        });
+        
+        // Handle rate limiting
+        if (response.status === 429) {
+            throw new Error('API rate limit exceeded. Please wait a moment and try again.');
+        }
+        
+        // Handle other HTTP errors
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            
+            // Parse VT error response
+            if (errorData.error) {
+                throw new Error(this.parseErrorMessage(errorData.error));
+            }
+            
+            throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+        }
+        
+        return await response.json();
     }
     
     /**

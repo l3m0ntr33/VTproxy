@@ -2,76 +2,151 @@
 
 > **BETA VERSION** - Early release, features and functionality may change
 
-A client-side VirusTotal interface that runs entirely in your browser. Search and analyze files, URLs, domains, and IPs using your own VirusTotal API key—no backend required, no installation needed.
+A lightweight VirusTotal interface that helps you **preserve your precious Intelligence search quota** while analyzing files, URLs, domains, and IPs.
 
-## 🎯 What is VTproxy?
+## 🎯 Why VTproxy?
 
-VTproxy is a lightweight web application that lets you interact with VirusTotal's threat intelligence platform directly from your browser. It's designed to:
+### The Problem with VirusTotal's Web Interface
 
-- **Preserve your VirusTotal Intelligence search quota** by accessing VT results pages through direct links or by using API requests to view analysis data
-- **Work completely offline** once loaded (no server required)
-- **Protect your privacy** by storing your API key locally in your browser
-- **Provide a modern UI** with a clean, dark theme and responsive design
+VirusTotal's **Intelligence search** is a powerful premium feature, but it comes with a **limited monthly quota** (typically 10-20 searches/month depending on your subscription). 
 
-Perfect for security analysts, researchers, and anyone who regularly checks files, URLs, domains, or IP addresses for threats.
+**The issue:** Every time you use the VT website's search bar — even for simple lookups like a single domain, file hash, URL, or IP — **it consumes 1 Intelligence search quota**. This happens whether you're doing a basic lookup or an advanced query with [VT Intelligence modifiers](https://raw.githubusercontent.com/Neo23x0/vti-dorks/refs/heads/master/README.md).
+
+This is wasteful when you just want to check a single indicator without using advanced search features.
+
+### The VTproxy Solution
+
+**VTproxy lets you perform simple lookups using your API quota instead of Intelligence search quota:**
+
+- ✅ **Direct VT links** option to open results in VirusTotal without any quota consumption
+- ✅ **Preserve Intelligence searches** for when you really need advanced queries
+- ✅ **Use your abundant API quota** (much higher daily limit, especially with premium)
+- ✅ **Get detailed API responses** with technical data sometimes not shown on the VT website
+
+**Three deployment options:**
+
+- **🌐 Hosted Version** - [Try it now](https://research.cert.orangecyberdefense.com/vt_proxy) hosted by Orange Cyberdefense CERT
+  - No installation needed, works anywhere
+  - Direct VT links only (no API calls due to CORS)
+  - **Zero quota consumption**
+- **💻 Desktop App** - Native application with no CORS restrictions
+  - Full API access and VT direct links
+  - Works offline, native performance
+- **🏠 Browser Version (Localhost)** - Run locally on your machine
+  - Full API access and VT direct links
+  - Requires local web server
+
+**Additional benefits:**
+- 🔒 **Privacy-first**: API key stored locally, never leaves your device
+- 🎨 **Modern dark UI** with clean design and responsive layout
+- ⚡ **Fast & lightweight**: Desktop app is only ~5MB!
+
+Perfect for security analysts, researchers, and anyone who regularly checks indicators without wanting to waste their Intelligence search quota.
 
 ## ✨ Key Features
 
-### 🔍 Multi-Type Analysis
-- **File Analysis** - Check files by hash (MD5, SHA-1, SHA-256)
-- **URL Scanning** - Analyze URLs for malicious content
-- **Domain Intelligence** - Get DNS, WHOIS, and relationship data
-- **IP Analysis** - View geolocation, ASN, and associated domains
-
-### 📊 Comprehensive Results
-- **Detection Scores** - See verdicts from 70+ security vendors
-- **Detailed Information** - Technical metadata, certificates, HTTP headers
-- **Relationships** - Connected entities, DNS history, embedded files
-- **Behavior Analysis** - Sandbox execution data (for files)
-- **Community Feedback** - Comments and votes from VirusTotal users
-
 ### 🎨 User Experience
-- **Dark Theme** - Easy on the eyes with custom orange accents
-- **Fully Responsive** - Works seamlessly on desktop, tablet, and mobile
-- **Fast & Lightweight** - Static files, no build process, instant loading
-- **Privacy First** - Your API key never leaves your browser
+- **🔍 Smart Input Detection** - Automatically detects if you're searching for a file hash, URL, domain, or IP
+- **🌙 Modern Dark Theme** - Easy on the eyes with custom orange accents
+- **📱 Fully Responsive** - Works seamlessly on desktop, tablet, and mobile
+- **⚡ Fast & Lightweight** - No build process, instant loading, static files
+- **🔒 Privacy First** - Your API key is stored locally and never leaves your device
+- **⌨️ Keyboard Shortcuts** - Press Enter to search or open directly in VirusTotal
+- **💾 Flexible Deployment** - Hosted version, desktop app, or run locally
 
 ## 🚀 Quick Start
 
-### Step 1: Get the App
+### Option 1: 🌐 Use Hosted Version (Easiest)
 
-**Option A: Download**
-- Download this repository as a ZIP file
-- Extract it to any folder on your computer
+**Just click and go:** [https://research.cert.orangecyberdefense.com/vt_proxy](https://research.cert.orangecyberdefense.com/vt_proxy)
 
-**Option B: Clone**
+- ✅ No installation needed
+- ✅ Works on any device
+- ⚠️ **Limitation:** Direct VT links only (no API calls due to CORS)
+- ✅ **Zero quota consumption**
+
+---
+
+### Option 2: 💻 Download Desktop App
+
+**Full features with API access!**
+
+Download the app for your operating system from [GitHub Releases](https://github.com/l3m0ntr33/VTproxy/releases):
+
+**Linux:**
 ```bash
-git clone <repository-url>
+# Download the AppImage or .deb from releases
+chmod +x vtproxy_*.AppImage
+./vtproxy_*.AppImage
+
+# Or install .deb
+sudo dpkg -i vtproxy_*.deb
+vtproxy
+```
+
+**Windows:**
+```bash
+# Download the .msi or .exe installer from releases
+# Double-click to install and run
+```
+
+**macOS:**
+```bash
+# Download the .dmg from releases
+# Drag to Applications folder
+```
+
+✅ Full API access + Direct VT links
+✅ No CORS restrictions
+
+---
+
+### Option 3: 🏠 Run Locally (For Developers)
+
+**Clone the repository and start a local web server:**
+
+```bash
+# Clone the repo
+git clone https://github.com/l3m0ntr33/VTproxy.git
 cd VTproxy
 ```
 
-### Step 2: Open in Browser
-
-**Easiest Method:**
-Simply double-click `index.html` to open it in your default browser.
-
-**Recommended Method** (to avoid CORS issues):
+**Linux/macOS:**
 ```bash
-# Using Python (most common)
+# Using Python
 python3 -m http.server 8000
 
-# Then open your browser to: http://localhost:8000
+# Or using PHP
+php -S localhost:8000
 ```
 
-### Step 3: Configure Your API Key
+**Windows:**
+```powershell
+# Using Python
+python -m http.server 8000
+
+# Or using npm http-server
+npx http-server -p 8000
+```
+
+Then open: **http://localhost:8000**
+
+✅ Full API access + Direct VT links
+⚠️ Only works on localhost
+
+---
+
+### 🔑 Configure Your API Key (Options 2 & 3)
 
 1. Get your VirusTotal API key from [virustotal.com/gui/my-apikey](https://www.virustotal.com/gui/my-apikey)
-   - Free accounts available
-   - Premium accounts get higher rate limits
-2. In VTproxy, click the ⚙️ settings icon (top right)
-3. Paste your API key and click "Save"
+2. In VTproxy, click the **🔑 API key** button (top-right corner)
+3. Paste your API key and click **Save**
 
 **That's it!** Start searching for files, URLs, domains, or IP addresses.
+
+> 💡 **Note:** Option 1 (hosted version) doesn't need an API key - it uses direct VT links only.
+
+> 🔨 **Want to build from source?** See [BUILDING.md](BUILDING.md) for development instructions.
 
 ## 🔒 Privacy & Security
 
@@ -90,17 +165,28 @@ Your rate limits depend on your VirusTotal account type:
 **Free Account:**
 - 4 requests per minute
 - 500 requests per day
+- ⚠️ **Limited features**: Some API endpoints are restricted to premium users only
 
 **Premium Account:**
 - Higher limits based on your plan
+- ✅ **Full access**: All API endpoints and advanced features available
 - See [VirusTotal pricing](https://www.virustotal.com/gui/services-overview) for details
+
+> 💡 **Note:** If you have a free API key, some VTproxy features may not work as they require premium API endpoints (e.g., certain relationship data, advanced analysis). The core functionality (file/URL/domain/IP lookups) works with free accounts.
 
 ## 🛠️ Technical Details
 
+**Frontend:**
 - **Pure HTML/CSS/JavaScript** - No frameworks, no dependencies
 - **ES6 Modules** - Modern, modular code structure
 - **Responsive Design** - Mobile-first approach
-- **Zero Build Tools** - No npm, webpack, or compilation needed
+- **Adaptive** - Auto-detects browser vs desktop environment
+
+**Desktop App (Tauri):**
+- **Rust Backend** - Secure, fast, tiny (~5MB total)
+- **No CORS Issues** - Native HTTP requests
+- **Cross-Platform** - Linux, Windows, macOS
+- **System Integration** - Native look and feel
 
 ## 🐛 Beta Limitations
 

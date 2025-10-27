@@ -1,0 +1,28 @@
+{
+  "name": "vtproxy",
+  "version": "0.0.1",
+  "description": "Client-side VirusTotal proxy interface with Tauri desktop app support",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "sync-config": "node sync-config.js",
+    "build-web": "node build-web.js"
+  },
+  "keywords": [
+    "virustotal",
+    "security",
+    "malware",
+    "analysis",
+    "tauri",
+    "desktop"
+  ],
+  "author": "Orange Cyberdefense CERT",
+  "license": "MIT",
+  "devDependencies": {
+    "@tauri-apps/cli": "^1.5.9"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^1.5.3"
+  }
+}

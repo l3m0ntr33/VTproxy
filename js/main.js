@@ -20,12 +20,106 @@ const clearApiKeyBtn = document.getElementById('clear-api-key');
 const apiKeyStatus = document.getElementById('api-key-status');
 const toast = document.getElementById('toast');
 
+// State
+let isApiDisabledDueToCors = false;
+
 // ==================== Initialization ====================
+
+/**
+ * Check if running on localhost
+ */
+function isLocalhost() {
+    const hostname = window.location.hostname;
+    return hostname === 'localhost' || 
+           hostname === '127.0.0.1' || 
+           hostname === '[::1]' ||
+           hostname === '' ||
+           hostname.startsWith('192.168.') ||
+           hostname.startsWith('10.') ||
+           hostname.startsWith('172.');
+}
+
+/**
+ * Check if running in Tauri desktop app
+ */
+function isTauri() {
+    return typeof window !== 'undefined' && window.__TAURI__ !== undefined;
+}
+
+/**
+ * Check environment and show CORS warning if needed
+ */
+function checkEnvironment() {
+    const tauri = isTauri();
+    const localhost = isLocalhost();
+    
+    // Debug mode: force CORS warning with ?debug-cors=true
+    const urlParams = new URLSearchParams(window.location.search);
+    const debugCors = urlParams.get('debug-cors') === 'true';
+    
+    if (debugCors) {
+        console.log('🧪 Debug mode: Forcing CORS warning');
+    }
+    
+    if (!tauri && (!localhost || debugCors)) {
+        // Running in browser on non-localhost domain - API won't work due to CORS
+        isApiDisabledDueToCors = true;
+        
+        searchBtn.disabled = true;
+        searchBtn.title = 'API search disabled - CORS restriction';
+        searchBtn.style.opacity = '0.5';
+        searchBtn.style.cursor = 'not-allowed';
+        
+        // Show warning message
+        showToast('⚠️ API search disabled: VirusTotal blocks API requests from non-localhost domains due to CORS policy. Use the VT button to open in VirusTotal, or download the desktop app for full functionality.', 'warning', 10000);
+        
+        // Add persistent warning below search
+        const warning = document.createElement('div');
+        warning.className = 'cors-warning';
+        warning.innerHTML = `
+            <strong>⚠️ Limited Functionality</strong><br>
+            API search is disabled because VirusTotal's CORS policy blocks requests from hosted domains.<br>
+            <strong>Solutions:</strong>
+            <ul>
+                <li>✅ Use the <strong>VT button</strong> to open results in VirusTotal directly (or press <strong>Enter</strong>)</li>
+                <li>✅ Download the <strong>desktop app</strong> for full API access without restrictions</li>
+                <li>✅ Run locally: <code>python3 -m http.server 8000</code> on localhost</li>
+            </ul>
+        `;
+        warning.style.cssText = `
+            margin-top: 1rem;
+            padding: 1rem;
+            background: rgba(255, 107, 53, 0.1);
+            border: 1px solid rgba(255, 107, 53, 0.3);
+            border-radius: 8px;
+            color: #ff6b35;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        `;
+        warning.querySelector('ul').style.cssText = `
+            margin: 0.5rem 0 0 1.5rem;
+            padding: 0;
+        `;
+        searchInput.parentElement.parentElement.appendChild(warning);
+        
+        // Update placeholder to hint at Enter behavior
+        searchInput.placeholder = 'Enter hash, URL, domain, or IP (press Enter to open in VirusTotal)';
+        
+        console.warn('🌐 Running on non-localhost domain - API features disabled due to CORS');
+    } else if (tauri) {
+        console.log('🚀 Running in Tauri desktop app - Full API access enabled');
+    } else {
+        console.log('🏠 Running on localhost - API access enabled');
+    }
+}
 
 /**
  * Initialize the application
  */
 function init() {
+    // Check environment and show CORS warning if needed
+    checkEnvironment();
+    
     // Check if API key exists
     checkApiKey();
     
@@ -173,7 +267,12 @@ function handleInputChange() {
  */
 function handleKeyPress(e) {
     if (e.key === 'Enter') {
-        handleSearch();
+        // If API is disabled due to CORS, use VT button instead
+        if (isApiDisabledDueToCors) {
+            handleOpenInVT();
+        } else {
+            handleSearch();
+        }
     }
 }
 
@@ -226,7 +325,7 @@ function navigateToResults(type, input) {
 /**
  * Handle opening in VirusTotal
  */
-function handleOpenInVT() {
+async function handleOpenInVT() {
     const input = searchInput.value.trim();
     
     // Validate input
@@ -239,9 +338,22 @@ function handleOpenInVT() {
     // Generate VT URL based on type
     const vtUrl = generateVTUrl(validation.type, input);
     
-    // Open in new tab
-    window.open(vtUrl, '_blank');
-    showToast('Opening in VirusTotal...', 'info');
+    // Open in new tab/browser
+    try {
+        if (window.__TAURI__) {
+            // Use Tauri shell API for desktop app
+            const { open } = window.__TAURI__.shell;
+            await open(vtUrl);
+            showToast('Opening in VirusTotal...', 'success');
+        } else {
+            // Use window.open for browser
+            window.open(vtUrl, '_blank');
+            showToast('Opening in VirusTotal...', 'info');
+        }
+    } catch (error) {
+        console.error('Failed to open VirusTotal:', error);
+        showToast('Failed to open VirusTotal', 'error');
+    }
 }
 
 /**
@@ -282,17 +394,18 @@ function generateVTUrl(type, input) {
 /**
  * Show toast notification
  * @param {string} message - Toast message
- * @param {string} type - Toast type: 'success', 'error', 'info'
+ * @param {string} type - Toast type: 'success', 'error', 'info', 'warning'
+ * @param {number} duration - Duration in milliseconds (default: 3000)
  */
-function showToast(message, type = 'info') {
+function showToast(message, type = 'info', duration = 3000) {
     toast.textContent = message;
     toast.className = `toast ${type}`;
     toast.classList.remove('hidden');
     
-    // Auto-hide after 3 seconds
+    // Auto-hide after specified duration
     setTimeout(() => {
         toast.classList.add('hidden');
-    }, 3000);
+    }, duration);
 }
 
 // ==================== Start Application ====================

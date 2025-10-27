@@ -177,6 +177,20 @@
     border-left: 3px solid var(--orange-primary);
 }
 
+.toast.warning {
+    border-left: 3px solid #ffb84d;
+    background: rgba(255, 184, 77, 0.1);
+}
+
+/* Code elements in warnings */
+code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 0.2rem 0.4rem;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+}
+
 @keyframes slideIn {
     from {
         transform: translateX(400px);
