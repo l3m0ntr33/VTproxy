@@ -1,6 +1,6 @@
 {
   "name": "vtproxy",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Client-side VirusTotal proxy interface with Tauri desktop app support",
   "scripts": {
     "tauri": "tauri",
