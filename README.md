@@ -8,7 +8,7 @@ A client-side VirusTotal interface that runs entirely in your browser. Search an
 
 VTproxy is a lightweight web application that lets you interact with VirusTotal's threat intelligence platform directly from your browser. It's designed to:
 
-- **Save your VirusTotal search quota** by using API requests instead of web interface searches
+- **Preserve your VirusTotal Intelligence search quota** by accessing VT results pages through direct links or by using API requests to view analysis data
 - **Work completely offline** once loaded (no server required)
 - **Protect your privacy** by storing your API key locally in your browser
 - **Provide a modern UI** with a clean, dark theme and responsive design
