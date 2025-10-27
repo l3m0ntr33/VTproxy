@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="VTproxy - Client-side VirusTotal analysis interface">
+    <title>VTproxy - VirusTotal Analysis</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/responsive.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="app-header">
+        <div class="container">
+            <div class="header-content">
+                <div class="logo">
+                    <a href="https://www.orangecyberdefense.com/global/about/orange-cyberdefense-cert" target="_blank" rel="noopener noreferrer">
+                        <img src="cert_blason.webp" alt="Orange Cyber Defense CERT" class="header-logo">
+                    </a>
+                    <h1>VTproxy</h1>
+                </div>
+                <div class="header-actions">
+                    <button id="api-key-btn" class="btn-icon" title="API Key Settings">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="landing-page">
+        <div class="container">
+            <!-- Hero Section -->
+            <div class="hero">
+                <div class="hero-icon">
+                    <a href="https://www.orangecyberdefense.com/global/about/orange-cyberdefense-cert" target="_blank" rel="noopener noreferrer">
+                        <img src="cert_blason.webp" alt="Orange Cyber Defense CERT" class="hero-logo">
+                    </a>
+                    <h1 class="hero-title">VTproxy</h1>
+                </div>
+                <p class="hero-subtitle"><strong>Save your VirusTotal search quota</strong> by accessing VT results pages directly or by using VT API</p>
+            </div>
+
+            <!-- Search Section -->
+            <div class="search-section">
+                <div class="search-container">
+                    <input 
+                        type="text" 
+                        id="search-input" 
+                        class="search-input"
+                        placeholder="Search or scan a file hash, URL, IP address, or domain"
+                        autocomplete="off"
+                        spellcheck="false"
+                    >
+                    <button id="search-btn" class="search-btn" title="Use my API key to get data">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <path d="m21 21-4.35-4.35"></path>
+                        </svg>
+                    </button>
+                    <button id="vt-btn" class="vt-btn" title="Open in VirusTotal">
+                        VT
+                    </button>
+                </div>
+                
+                <!-- Input Type Indicator -->
+                <div id="type-indicator" class="type-indicator hidden"></div>
+                
+                <!-- Search Hints -->
+                <div class="search-hints">
+                    <p class="hint-text">Supported formats:</p>
+                    <ul class="hint-list">
+                        <li><strong>File hash:</strong> MD5, SHA-1, or SHA-256</li>
+                        <li><strong>URL:</strong> http:// or https://</li>
+                        <li><strong>Domain:</strong> example.com</li>
+                        <li><strong>IP:</strong> IPv4 or IPv6 address</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Info Banner -->
+            <div class="info-banner">
+                <p>VTproxy runs entirely in your browser. No data is sent to our servers - your searches and API key are processed locally and only communicate directly with VirusTotal.</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- API Key Modal -->
+    <div id="api-key-modal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>API Key Settings</h2>
+                <button id="modal-close" class="btn-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-description">Enter your VirusTotal API key. Get one at <a href="https://www.virustotal.com/gui/my-apikey" target="_blank">virustotal.com/gui/my-apikey</a></p>
+                
+                <div class="form-group">
+                    <label for="api-key-input">API Key</label>
+                    <input 
+                        type="text" 
+                        id="api-key-input" 
+                        class="input-field"
+                        placeholder="Enter your API key"
+                        autocomplete="off"
+                    >
+                </div>
+                
+                <div class="api-key-status" id="api-key-status"></div>
+                
+                <div class="modal-actions">
+                    <button id="save-api-key" class="btn-primary">Save</button>
+                    <button id="clear-api-key" class="btn-secondary">Clear</button>
+                </div>
+                
+                <div class="modal-note">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                    </svg>
+                    <span>Your API key is stored locally in your browser and never sent anywhere except VirusTotal.</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- Scripts -->
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>

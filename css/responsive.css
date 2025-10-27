@@ -1,0 +1,317 @@
+/* ==========================================
+   VTproxy - Responsive Styles
+   ========================================== */
+
+/* Tablet and below */
+@media (max-width: 1023px) {
+    .hero-title {
+        font-size: 3.75rem;
+    }
+    
+    .info-card-content {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .detection-circle {
+        margin: 0 auto;
+    }
+    
+    /* Detection stats cards - 2-3 columns on tablet */
+    .detection-stats-cards {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+/* Mobile landscape and below */
+@media (max-width: 767px) {
+    :root {
+        --spacing-xl: 1.5rem;
+        --spacing-2xl: 2rem;
+    }
+    
+    .container {
+        padding: 0 var(--spacing-sm);
+    }
+    
+    /* Header */
+    .header-content {
+        flex-wrap: wrap;
+    }
+    
+    .header-search {
+        order: 3;
+        width: 100%;
+        max-width: 100%;
+    }
+    
+    /* Hero */
+    .hero-icon {
+        flex-direction: column;
+        gap: var(--spacing-sm);
+    }
+    
+    .hero-logo {
+        height: 80px;
+    }
+    
+    .hero-title {
+        font-size: 3rem;
+    }
+    
+    .hero-subtitle {
+        font-size: 1rem;
+    }
+    
+    /* Header */
+    .header-logo {
+        height: 32px;
+    }
+    
+    .logo h1 {
+        font-size: 1.25rem;
+    }
+    
+    /* Search */
+    .search-input {
+        padding: 0.875rem 6rem 0.875rem 1rem;
+        font-size: 0.875rem;
+    }
+    
+    .search-btn {
+        padding: 0.625rem;
+        right: 0.375rem;
+    }
+    
+    .vt-btn {
+        padding: 0.5rem;
+        right: 3rem;
+        font-size: 0.875rem;
+        width: 2.5rem;
+        height: 2.5rem;
+    }
+    
+    /* Modal */
+    .modal {
+        padding: var(--spacing-md);
+    }
+    
+    .modal-content {
+        max-width: 100%;
+    }
+    
+    .modal-header h2 {
+        font-size: 1.125rem;
+    }
+    
+    .modal-actions {
+        flex-direction: column;
+    }
+    
+    .modal-actions button {
+        width: 100%;
+    }
+    
+    /* Info Card */
+    .info-card {
+        padding: var(--spacing-lg);
+    }
+    
+    .info-card-content {
+        gap: var(--spacing-lg);
+    }
+    
+    .detection-circle {
+        width: 100px;
+        height: 100px;
+    }
+    
+    .circle-text .score {
+        font-size: 1.5rem;
+    }
+    
+    .circle-text .divider,
+    .circle-text .total {
+        font-size: 1.125rem;
+    }
+    
+    .entity-info h2 {
+        font-size: 1.125rem;
+    }
+    
+    /* Tab Navigation */
+    .tab-navigation {
+        gap: var(--spacing-sm);
+    }
+    
+    .tab-btn {
+        padding: var(--spacing-sm) var(--spacing-md);
+        font-size: 0.813rem;
+    }
+    
+    /* Table */
+    .table {
+        font-size: 0.813rem;
+    }
+    
+    .table th,
+    .table td {
+        padding: var(--spacing-sm);
+    }
+    
+    /* Cards */
+    .card {
+        padding: var(--spacing-md);
+    }
+    
+    /* Detection stats cards - 2 columns on mobile */
+    .detection-stats-cards {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-sm);
+    }
+    
+    .stat-card {
+        padding: var(--spacing-md);
+    }
+    
+    .stat-value {
+        font-size: 1.75rem;
+    }
+    
+    /* Toast */
+    .toast {
+        left: var(--spacing-sm);
+        right: var(--spacing-sm);
+        bottom: var(--spacing-sm);
+        max-width: 100%;
+    }
+}
+
+/* Small mobile */
+@media (max-width: 479px) {
+    .header-logo {
+        height: 28px;
+    }
+    
+    .logo h1 {
+        font-size: 1rem;
+    }
+    
+    .hero-logo {
+        height: 70px;
+    }
+    
+    .hero-title {
+        font-size: 2.5rem;
+    }
+    
+    .hero-icon svg {
+        width: 64px;
+        height: 64px;
+    }
+    
+    .search-hints {
+        padding: var(--spacing-md);
+    }
+    
+    .hint-list {
+        font-size: 0.813rem;
+    }
+    
+    /* Reduce detection circle size */
+    .detection-circle {
+        width: 80px;
+        height: 80px;
+    }
+    
+    .circle-text .score {
+        font-size: 1.25rem;
+    }
+    
+    .circle-text .divider,
+    .circle-text .total {
+        font-size: 1rem;
+    }
+    
+    /* Stack table cells on very small screens */
+    .table-mobile-stack th {
+        display: none;
+    }
+    
+    .table-mobile-stack td {
+        display: block;
+        padding: var(--spacing-xs) var(--spacing-sm);
+        border: none;
+    }
+    
+    .table-mobile-stack tr {
+        display: block;
+        margin-bottom: var(--spacing-md);
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-sm);
+        padding: var(--spacing-sm);
+    }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+    /* Increase touch targets */
+    .btn-icon {
+        min-width: 44px;
+        min-height: 44px;
+    }
+    
+    .tab-btn {
+        min-height: 44px;
+    }
+    
+    /* Remove hover effects */
+    .btn-primary:hover {
+        background: var(--orange-primary);
+    }
+    
+    .btn-secondary:hover {
+        background: var(--bg-tertiary);
+    }
+    
+    .btn-icon:hover {
+        color: var(--text-secondary);
+        background: transparent;
+    }
+}
+
+/* Results page header search visibility */
+.results-page .header-search {
+    display: block;
+}
+
+@media (max-width: 767px) {
+    .results-page .header-search {
+        display: block;
+        width: 100%;
+    }
+}
+
+/* Print styles */
+@media print {
+    .app-header,
+    .modal,
+    .toast,
+    .search-btn,
+    .btn-icon,
+    .tab-navigation {
+        display: none !important;
+    }
+    
+    body {
+        background: white;
+        color: black;
+    }
+    
+    .info-card,
+    .card,
+    .expandable-section {
+        border: 1px solid #ccc;
+        break-inside: avoid;
+    }
+}

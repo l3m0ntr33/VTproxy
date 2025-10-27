@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="VTproxy - Analysis Results">
+    <title>Analysis Results - VTproxy</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/responsive.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="app-header">
+        <div class="container">
+            <div class="header-content">
+                <div class="logo">
+                    <a href="https://www.orangecyberdefense.com/global/about/orange-cyberdefense-cert" target="_blank" rel="noopener noreferrer">
+                        <img src="cert_blason.webp" alt="Orange Cyber Defense CERT" class="header-logo">
+                    </a>
+                    <a href="index.html">
+                        <h1>VTproxy</h1>
+                    </a>
+                </div>
+                <div class="header-search">
+                    <input 
+                        type="text" 
+                        id="header-search-input" 
+                        class="header-search-input"
+                        placeholder="Search..."
+                        autocomplete="off"
+                    >
+                    <button id="header-search-btn" class="btn-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <path d="m21 21-4.35-4.35"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="header-actions">
+                    <button id="api-key-btn" class="btn-icon" title="API Key Settings">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="results-page">
+        <div class="container">
+            <!-- Loading State -->
+            <div id="loading" class="loading-container">
+                <div class="loading-spinner"></div>
+                <p>Loading analysis results...</p>
+            </div>
+
+            <!-- Error State -->
+            <div id="error-container" class="error-container hidden">
+                <div class="error-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                </div>
+                <h2 id="error-title">Error</h2>
+                <p id="error-message"></p>
+                <button id="retry-btn" class="btn-primary">Retry</button>
+                <a href="index.html" class="btn-secondary">Back to Search</a>
+            </div>
+
+            <!-- Results Container -->
+            <div id="results-container" class="hidden">
+                <!-- Info Card -->
+                <div class="info-card">
+                    <div class="info-card-content">
+                        <div id="detection-circle" class="detection-circle-container"></div>
+                        <div id="entity-info" class="entity-info"></div>
+                        <div id="entity-meta" class="entity-meta"></div>
+                    </div>
+                </div>
+
+                <!-- Alert Banner -->
+                <div id="alert-banner" class="alert-banner hidden"></div>
+
+                <!-- Tab Navigation -->
+                <nav id="tab-nav" class="tab-navigation">
+                    <!-- Tabs will be dynamically inserted -->
+                </nav>
+
+                <!-- Tab Content -->
+                <div id="tab-content" class="tab-content">
+                    <!-- Content will be dynamically inserted -->
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- API Key Modal (same as index.html) -->
+    <div id="api-key-modal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>API Key Settings</h2>
+                <button id="modal-close" class="btn-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-description">Enter your VirusTotal API key. Get one at <a href="https://www.virustotal.com/gui/my-apikey" target="_blank">virustotal.com/gui/my-apikey</a></p>
+                
+                <div class="form-group">
+                    <label for="api-key-input">API Key</label>
+                    <input 
+                        type="text" 
+                        id="api-key-input" 
+                        class="input-field"
+                        placeholder="Enter your API key"
+                        autocomplete="off"
+                    >
+                </div>
+                
+                <div class="api-key-status" id="api-key-status"></div>
+                
+                <div class="modal-actions">
+                    <button id="save-api-key" class="btn-primary">Save</button>
+                    <button id="clear-api-key" class="btn-secondary">Clear</button>
+                </div>
+                
+                <div class="modal-note">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                    </svg>
+                    <span>Your API key is stored locally in your browser and never sent anywhere except VirusTotal.</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- Scripts -->
+    <script type="module" src="js/pages/results.js"></script>
+</body>
+</html>
