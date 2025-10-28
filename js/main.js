@@ -172,6 +172,11 @@ function init() {
  * Check if API key is configured
  */
 function checkApiKey() {
+    // Don't prompt for API key if CORS is disabled (API won't work anyway)
+    if (isApiDisabledDueToCors) {
+        return;
+    }
+    
     if (!hasApiKey()) {
         // Show modal after a short delay
         setTimeout(() => {
