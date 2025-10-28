@@ -56,6 +56,34 @@ export function detectInputType(input) {
 }
 
 /**
+ * Detect specific hash type (MD5, SHA-1, or SHA-256)
+ * @param {string} input - User input string
+ * @returns {string|null} Hash type: 'md5', 'sha1', 'sha256', or null if not a hash
+ */
+export function detectHashType(input) {
+    if (!input || typeof input !== 'string') {
+        return null;
+    }
+    
+    const trimmed = input.trim();
+    
+    // MD5: 32 hex characters
+    if (/^[a-fA-F0-9]{32}$/.test(trimmed)) {
+        return 'md5';
+    }
+    // SHA-1: 40 hex characters
+    if (/^[a-fA-F0-9]{40}$/.test(trimmed)) {
+        return 'sha1';
+    }
+    // SHA-256: 64 hex characters
+    if (/^[a-fA-F0-9]{64}$/.test(trimmed)) {
+        return 'sha256';
+    }
+    
+    return null;
+}
+
+/**
  * Get a human-readable label for input type
  * @param {string} type - Input type
  * @returns {string} Human-readable label

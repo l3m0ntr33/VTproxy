@@ -408,9 +408,12 @@ input, textarea, select {
 
 .type-indicator {
     text-align: center;
-    padding: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
     font-size: 0.875rem;
     color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    transition: all 0.2s ease;
+    margin-top: var(--spacing-xs);
 }
 
 .type-indicator.hidden {
@@ -454,6 +457,48 @@ input, textarea, select {
     color: var(--text-muted);
     max-width: 600px;
     margin: 0 auto;
+}
+
+/* ==========================================
+   Footer
+   ========================================== */
+
+.app-footer {
+    padding: var(--spacing-xl) 0;
+    margin-top: var(--spacing-2xl);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.footer-content {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.github-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-lg);
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-radius: var(--radius-md);
+    transition: all 0.2s ease;
+    font-size: 0.95rem;
+}
+
+.github-link:hover {
+    color: var(--primary);
+    background: rgba(255, 107, 53, 0.1);
+    transform: translateY(-2px);
+}
+
+.github-link svg {
+    transition: transform 0.2s ease;
+}
+
+.github-link:hover svg {
+    transform: scale(1.1);
 }
 
 /* ==========================================

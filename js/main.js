@@ -3,7 +3,7 @@
  */
 
 import { getApiKey, saveApiKey, clearApiKey, hasApiKey } from './utils/storage.js';
-import { detectInputType, validateInput, getTypeLabel } from './utils/inputDetector.js';
+import { detectInputType, validateInput, getTypeLabel, detectHashType } from './utils/inputDetector.js';
 import { encodeUrlForVT } from './api/urlEncoder.js';
 
 // DOM Elements
@@ -19,9 +19,15 @@ const saveApiKeyBtn = document.getElementById('save-api-key');
 const clearApiKeyBtn = document.getElementById('clear-api-key');
 const apiKeyStatus = document.getElementById('api-key-status');
 const toast = document.getElementById('toast');
+const hashWarningModal = document.getElementById('hash-warning-modal');
+const hashWarningClose = document.getElementById('hash-warning-close');
+const hashWarningMessage = document.getElementById('hash-warning-message');
+const hashWarningContinue = document.getElementById('hash-warning-continue');
+const hashWarningCancel = document.getElementById('hash-warning-cancel');
 
 // State
 let isApiDisabledDueToCors = false;
+let pendingSearchData = null; // Store search data when showing hash warning
 
 // ==================== Initialization ====================
 
@@ -70,6 +76,12 @@ function checkEnvironment() {
         searchBtn.style.opacity = '0.5';
         searchBtn.style.cursor = 'not-allowed';
         
+        // Disable API key settings button
+        apiKeyBtn.disabled = true;
+        apiKeyBtn.title = 'API settings disabled - Not available on hosted domains due to CORS restrictions. Use localhost or desktop app.';
+        apiKeyBtn.style.opacity = '0.5';
+        apiKeyBtn.style.cursor = 'not-allowed';
+        
         // Show warning message
         showToast('⚠️ API search disabled: VirusTotal blocks API requests from non-localhost domains due to CORS policy. Use the VT button to open in VirusTotal, or download the desktop app for full functionality.', 'warning', 10000);
         
@@ -82,7 +94,7 @@ function checkEnvironment() {
             <strong>Solutions:</strong>
             <ul>
                 <li>✅ Use the <strong>VT button</strong> to open results in VirusTotal directly (or press <strong>Enter</strong>)</li>
-                <li>✅ Download the <strong>desktop app</strong> for full API access without restrictions</li>
+                <li>✅ <a href="https://github.com/l3m0ntr33/VTproxy/releases" target="_blank" rel="noopener noreferrer" style="color: #ff6b35; text-decoration: underline;">Download the <strong>desktop app</strong></a> for full API access without restrictions</li>
                 <li>✅ Run locally: <code>python3 -m http.server 8000</code> on localhost</li>
             </ul>
         `;
@@ -132,11 +144,21 @@ function init() {
     modalClose.addEventListener('click', closeApiKeyModal);
     saveApiKeyBtn.addEventListener('click', handleSaveApiKey);
     clearApiKeyBtn.addEventListener('click', handleClearApiKey);
+    hashWarningClose.addEventListener('click', closeHashWarningModal);
+    hashWarningContinue.addEventListener('click', handleHashWarningContinue);
+    hashWarningCancel.addEventListener('click', closeHashWarningModal);
     
     // Close modal on overlay click
     apiKeyModal.addEventListener('click', (e) => {
         if (e.target === apiKeyModal || e.target.classList.contains('modal-overlay')) {
             closeApiKeyModal();
+        }
+    });
+    
+    // Close hash warning modal on overlay click
+    hashWarningModal.addEventListener('click', (e) => {
+        if (e.target === hashWarningModal || e.target.classList.contains('modal-overlay')) {
+            closeHashWarningModal();
         }
     });
     
@@ -335,25 +357,17 @@ async function handleOpenInVT() {
         return;
     }
     
-    // Generate VT URL based on type
-    const vtUrl = generateVTUrl(validation.type, input);
-    
-    // Open in new tab/browser
-    try {
-        if (window.__TAURI__) {
-            // Use Tauri shell API for desktop app
-            const { open } = window.__TAURI__.shell;
-            await open(vtUrl);
-            showToast('Opening in VirusTotal...', 'success');
-        } else {
-            // Use window.open for browser
-            window.open(vtUrl, '_blank');
-            showToast('Opening in VirusTotal...', 'info');
+    // Check if it's MD5 or SHA-1 hash and show warning
+    if (validation.type === 'hash') {
+        const hashType = detectHashType(input);
+        if (hashType === 'md5' || hashType === 'sha1') {
+            showHashWarning(hashType, validation.type, input);
+            return;
         }
-    } catch (error) {
-        console.error('Failed to open VirusTotal:', error);
-        showToast('Failed to open VirusTotal', 'error');
     }
+    
+    // Open in VirusTotal
+    openInVirusTotal(validation.type, input);
 }
 
 /**
@@ -386,6 +400,65 @@ function generateVTUrl(type, input) {
         
         default:
             throw new Error('Unknown input type');
+    }
+}
+
+// ==================== Hash Warning Modal ====================
+
+/**
+ * Open in VirusTotal (actual implementation)
+ */
+async function openInVirusTotal(type, input) {
+    // Generate VT URL based on type
+    const vtUrl = generateVTUrl(type, input);
+    
+    // Open in new tab/browser
+    try {
+        if (window.__TAURI__) {
+            // Use Tauri shell API for desktop app
+            const { open } = window.__TAURI__.shell;
+            await open(vtUrl);
+            showToast('Opening in VirusTotal...', 'success');
+        } else {
+            // Use window.open for browser
+            window.open(vtUrl, '_blank');
+            showToast('Opening in VirusTotal...', 'info');
+        }
+    } catch (error) {
+        console.error('Failed to open VirusTotal:', error);
+        showToast('Failed to open VirusTotal', 'error');
+    }
+}
+
+/**
+ * Show hash warning modal for MD5/SHA-1
+ */
+function showHashWarning(hashType, type, input) {
+    const hashTypeLabel = hashType.toUpperCase();
+    hashWarningMessage.innerHTML = `You are about to open a ${hashTypeLabel} hash in VirusTotal. This will consume your search quota if you have a Premium VirusTotal API account. <strong style="color: #ff6b35;">Consider using SHA-256 instead</strong> for direct file access without quota consumption.`;
+    
+    // Store pending search data
+    pendingSearchData = { type, input };
+    
+    hashWarningModal.classList.remove('hidden');
+}
+
+/**
+ * Close hash warning modal
+ */
+function closeHashWarningModal() {
+    hashWarningModal.classList.add('hidden');
+    pendingSearchData = null;
+}
+
+/**
+ * Continue with opening in VT after hash warning
+ */
+function handleHashWarningContinue() {
+    if (pendingSearchData) {
+        const { type, input } = pendingSearchData;
+        closeHashWarningModal();
+        openInVirusTotal(type, input);
     }
 }
 
