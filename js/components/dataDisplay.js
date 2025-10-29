@@ -12,16 +12,18 @@ export { escapeHtml };
  * @param {string} label - Property label
  * @param {string|number} value - Property value
  * @param {boolean} monospace - Use monospace font
+ * @param {boolean} allowHtml - Allow HTML in value (don't escape)
  * @returns {string} HTML string
  */
-export function createPropertyRow(label, value, monospace = false) {
+export function createPropertyRow(label, value, monospace = false, allowHtml = false) {
     const displayValue = value || 'N/A';
     const valueClass = monospace ? 'code-block' : '';
+    const safeValue = allowHtml ? String(displayValue) : escapeHtml(String(displayValue));
     
     return `
         <div class="property-row">
             <div class="property-label">${escapeHtml(label)}</div>
-            <div class="property-value ${valueClass}">${escapeHtml(String(displayValue))}</div>
+            <div class="property-value ${valueClass}">${safeValue}</div>
         </div>
     `;
 }

@@ -56,6 +56,27 @@ let currentType = null;
 let currentId = null;
 let vtClient = null;
 
+// ==================== Helper Functions ====================
+
+/**
+ * Convert country code to flag emoji
+ * @param {string} countryCode - Two-letter country code (e.g., "NL", "US")
+ * @returns {string} Flag emoji
+ */
+function getCountryFlag(countryCode) {
+    if (!countryCode || countryCode.length !== 2) return '';
+    
+    // Convert country code to flag emoji
+    // Unicode flags are based on Regional Indicator Symbols
+    // A = U+1F1E6, B = U+1F1E7, etc.
+    const codePoints = countryCode
+        .toUpperCase()
+        .split('')
+        .map(char => 127397 + char.charCodeAt(0));
+    
+    return String.fromCodePoint(...codePoints);
+}
+
 // ==================== Initialization ====================
 
 /**
@@ -221,10 +242,13 @@ function renderDetectionCircle() {
  * Render entity info
  */
 function renderEntityInfo() {
-    let title = '';
-    let subtitle = '';
-    let extraBadges = '';
-    const attrs = currentData.attributes;
+    try {
+        let title = '';
+        let subtitle = '';
+        let extraBadges = '';
+        const attrs = currentData.attributes;
+        
+        console.log('Rendering entity info for type:', currentType);
     
     switch (currentType) {
         case 'file':
@@ -280,19 +304,59 @@ function renderEntityInfo() {
             subtitle = 'Domain';
             break;
         case 'ip':
-            title = currentId;
-            subtitle = 'IP Address';
+            // Title: IP_ADDRESS (NETWORK_CIDR)
+            // Example: 178.16.54.109 (178.16.52.0/22)
+            const network = attrs.network ? ` (${attrs.network})` : '';
+            title = `${currentId}${network}`;
+            
+            // Subtitle: AS ASN (AS_OWNER)
+            // Example: AS 209800 (metaspinner net GmbH)
+            if (attrs.asn && attrs.as_owner) {
+                subtitle = `AS ${attrs.asn} (${escapeHtml(attrs.as_owner)})`;
+            } else if (attrs.asn) {
+                subtitle = `AS ${attrs.asn}`;
+            } else if (attrs.as_owner) {
+                subtitle = escapeHtml(attrs.as_owner);
+            } else {
+                subtitle = 'IP Address';
+            }
+            
+            // Info badges for tags (if available)
+            const ipBadges = [];
+            if (attrs.tags && attrs.tags.length > 0) {
+                const tagsToShow = attrs.tags.slice(0, 8);
+                tagsToShow.forEach(tag => {
+                    ipBadges.push(`<span class="info-badge badge-tag">${escapeHtml(tag)}</span>`);
+                });
+                
+                // Show "+X more" if there are additional tags
+                if (attrs.tags.length > 8) {
+                    const remaining = attrs.tags.length - 8;
+                    ipBadges.push(`<span class="info-badge badge-more">+${remaining} more</span>`);
+                }
+            }
+            
+            if (ipBadges.length > 0) {
+                extraBadges = `<div class="info-badges">${ipBadges.join('')}</div>`;
+            }
             break;
     }
     
-    entityInfo.innerHTML = `
-        <h2>${escapeHtml(title)}</h2>
-        <p class="text-secondary">${subtitle}</p>
-        ${extraBadges}
-    `;
-    
-    // Render metadata badges
-    renderEntityMeta();
+        entityInfo.innerHTML = `
+            <h2>${escapeHtml(title)}</h2>
+            <p class="text-secondary">${subtitle}</p>
+            ${extraBadges}
+        `;
+        
+        // Render metadata badges
+        renderEntityMeta();
+    } catch (error) {
+        console.error('Error rendering entity info:', error);
+        entityInfo.innerHTML = `
+            <h2>${escapeHtml(currentId)}</h2>
+            <p class="text-secondary">Error rendering entity info</p>
+        `;
+    }
 }
 
 /**
@@ -368,6 +432,37 @@ function renderEntityMeta() {
     // Optional: Times Submitted badge (for URLs)
     if (currentType === 'url' && attrs.times_submitted) {
         badges.push(`<span class="meta-badge">Submissions: ${formatNumber(attrs.times_submitted)}</span>`);
+    }
+    
+    // IP-specific metadata (minimal - matching VT layout)
+    if (currentType === 'ip') {
+        try {
+            // 1. Country with flag (if available)
+            const countryCode = attrs.country || (attrs.rdap && attrs.rdap.country) || null;
+            if (countryCode) {
+                // Add country flag emoji (convert country code to flag)
+                const flag = getCountryFlag(countryCode);
+                const displayText = flag ? `${flag} ${escapeHtml(countryCode)}` : escapeHtml(countryCode);
+                badges.push(`<span class="meta-badge">${displayText}</span>`);
+            }
+            
+            // 2. Last Analysis Date (already added by common code above)
+            // This is handled by the common code that checks attrs.last_analysis_date
+            
+            // 3. Reputation (only if not zero)
+            if (attrs.reputation !== undefined && attrs.reputation !== null && attrs.reputation !== 0) {
+                const reputation = attrs.reputation;
+                let reputationClass = '';
+                if (reputation < 0) {
+                    reputationClass = 'status-error'; // Negative = malicious
+                } else if (reputation > 0) {
+                    reputationClass = 'status-success'; // Positive = good
+                }
+                badges.push(`<span class="meta-badge ${reputationClass}">Reputation: ${reputation}</span>`);
+            }
+        } catch (error) {
+            console.error('Error rendering IP metadata badges:', error);
+        }
     }
     
     entityMeta.innerHTML = badges.join('');
@@ -509,11 +604,34 @@ function renderDetectionTab() {
     const leftColumn = vendors.slice(0, midpoint);
     const rightColumn = vendors.slice(midpoint);
     
+    // Helper function to get icon based on category
+    const getDetectionIcon = (category) => {
+        switch (category) {
+            case 'malicious':
+            case 'suspicious':
+                return '⊗'; // Red/orange circle with X
+            case 'harmless':
+                return '✓'; // Green checkmark
+            case 'timeout':
+                return '⏱'; // Clock/timer
+            case 'undetected':
+            default:
+                return '○'; // Gray circle
+        }
+    };
+    
+    // Helper function to capitalize first letter
+    const capitalizeResult = (text) => {
+        if (!text) return 'Undetected';
+        return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+    };
+    
     const leftRows = leftColumn.map(vendor => `
         <tr>
             <td>${escapeHtml(vendor.engine_name || vendor.name)}</td>
             <td class="${getStatusClass(vendor.category)}">
-                ${escapeHtml(vendor.result || vendor.category || 'Undetected')}
+                <span class="detection-icon">${getDetectionIcon(vendor.category)}</span>
+                ${escapeHtml(capitalizeResult(vendor.result || vendor.category))}
             </td>
         </tr>
     `).join('');
@@ -522,7 +640,8 @@ function renderDetectionTab() {
         <tr>
             <td>${escapeHtml(vendor.engine_name || vendor.name)}</td>
             <td class="${getStatusClass(vendor.category)}">
-                ${escapeHtml(vendor.result || vendor.category || 'Undetected')}
+                <span class="detection-icon">${getDetectionIcon(vendor.category)}</span>
+                ${escapeHtml(capitalizeResult(vendor.result || vendor.category))}
             </td>
         </tr>
     `).join('');
@@ -932,35 +1051,184 @@ function renderDomainDetails(attrs) {
  * Render IP details
  */
 function renderIpDetails(attrs) {
-    const basicProps = [
-        createPropertyRow('IP Address', currentId),
-        createPropertyRow('Country', attrs.country),
-        createPropertyRow('Continent', attrs.continent),
-        createPropertyRow('Network', attrs.network),
-        createPropertyRow('ASN', attrs.asn),
-        createPropertyRow('AS Owner', attrs.as_owner),
-    ].join('');
+    let sectionsHtml = '';
     
-    const timestamps = [
-        createPropertyRow('Last analysis', formatTimestamp(attrs.last_analysis_date)),
-        createPropertyRow('Last modification', formatTimestamp(attrs.last_modification_date)),
-    ].join('');
+    // Section 1: Basic Properties (expanded by default)
+    sectionsHtml += renderIpBasicProperties(attrs);
     
-    return `
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">Basic Properties</h3>
-            </div>
-            <div class="card-body">${basicProps}</div>
-        </div>
-        
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">History</h3>
-            </div>
-            <div class="card-body">${timestamps}</div>
+    // Section 2: Registration Data (RDAP) (collapsed)
+    sectionsHtml += renderIpRDAP(attrs);
+    
+    // Section 3: Whois Lookup (collapsed)
+    sectionsHtml += renderIpWhois(attrs);
+    
+    // Section 4: Whois results (collapsed, lazy-load)
+    sectionsHtml += renderIpHistoricalWhois(attrs);
+    
+    return sectionsHtml;
+}
+
+/**
+ * Render IP Basic Properties section
+ */
+function renderIpBasicProperties(attrs) {
+    const props = [];
+    
+    // Network
+    if (attrs.network) {
+        props.push(createPropertyRow('Network', attrs.network));
+    }
+    
+    // Autonomous System Number (clickable)
+    if (attrs.asn) {
+        props.push(createPropertyRow('Autonomous System Number', `AS${attrs.asn}`));
+    }
+    
+    // Autonomous System Label
+    if (attrs.as_owner) {
+        props.push(createPropertyRow('Autonomous System Label', attrs.as_owner));
+    }
+    
+    // Regional Internet Registry
+    if (attrs.regional_internet_registry) {
+        props.push(createPropertyRow('Regional Internet Registry', attrs.regional_internet_registry));
+    }
+    
+    // Country (with flag)
+    const countryCode = attrs.country || (attrs.rdap && attrs.rdap.country);
+    if (countryCode) {
+        const flag = getCountryFlag(countryCode);
+        const countryDisplay = flag ? `${flag} ${escapeHtml(countryCode)}` : escapeHtml(countryCode);
+        props.push(createPropertyRow('Country', countryDisplay, false, true));
+    }
+    
+    // Continent
+    if (attrs.continent) {
+        props.push(createPropertyRow('Continent', attrs.continent));
+    }
+    
+    // Reputation (if not zero)
+    if (attrs.reputation !== undefined && attrs.reputation !== null && attrs.reputation !== 0) {
+        const reputation = attrs.reputation;
+        const reputationClass = reputation < 0 ? 'text-error' : 'text-success';
+        props.push(createPropertyRow('Reputation', `<span class="${reputationClass}">${reputation}</span>`, false, true));
+    }
+    
+    // Community Votes
+    if (attrs.total_votes) {
+        const harmless = attrs.total_votes.harmless || 0;
+        const malicious = attrs.total_votes.malicious || 0;
+        props.push(createPropertyRow('Community Votes', `Harmless: ${harmless} | Malicious: ${malicious}`));
+    }
+    
+    return createExpandableSection(
+        'Basic Properties',
+        props.join(''),
+        true // expanded by default
+    );
+}
+
+/**
+ * Render IP RDAP section
+ */
+function renderIpRDAP(attrs) {
+    if (!attrs.rdap) {
+        return createExpandableSection(
+            'Registration Data (RDAP)',
+            '<p class="text-muted">RDAP data not available</p>',
+            false
+        );
+    }
+    
+    const rdap = attrs.rdap;
+    const props = [];
+    
+    // Basic RDAP fields
+    if (rdap.handle) props.push(createPropertyRow('Handle', rdap.handle));
+    if (rdap.name) props.push(createPropertyRow('Name', rdap.name));
+    if (rdap.type) props.push(createPropertyRow('Type', rdap.type));
+    if (rdap.country) {
+        const flag = getCountryFlag(rdap.country);
+        const countryDisplay = flag ? `${flag} ${escapeHtml(rdap.country)}` : escapeHtml(rdap.country);
+        props.push(createPropertyRow('Country', countryDisplay, false, true));
+    }
+    if (rdap.ip_version) props.push(createPropertyRow('IP Version', rdap.ip_version));
+    if (rdap.start_address) props.push(createPropertyRow('Start Address', rdap.start_address));
+    if (rdap.end_address) props.push(createPropertyRow('End Address', rdap.end_address));
+    if (rdap.parent_handle) props.push(createPropertyRow('Parent Handle', rdap.parent_handle));
+    
+    // Events (if available) - display as property rows for better formatting
+    if (rdap.events && rdap.events.length > 0) {
+        rdap.events.forEach(event => {
+            const action = event.event_action || 'unknown';
+            // Capitalize first letter of action
+            const label = action.charAt(0).toUpperCase() + action.slice(1).replace(/_/g, ' ');
+            const date = event.event_date ? formatTimestamp(new Date(event.event_date).getTime() / 1000) : 'N/A';
+            props.push(createPropertyRow(label, date));
+        });
+    }
+    
+    return createExpandableSection(
+        'Registration Data (RDAP)',
+        props.length > 0 ? props.join('') : '<p class="text-muted">No RDAP data available</p>',
+        false // collapsed by default
+    );
+}
+
+/**
+ * Render IP WHOIS section
+ */
+function renderIpWhois(attrs) {
+    if (!attrs.whois) {
+        return createExpandableSection(
+            'Whois Lookup',
+            '<p class="text-muted">WHOIS data not available</p>',
+            false
+        );
+    }
+    
+    const whoisText = attrs.whois;
+    const content = `
+        <div class="whois-container">
+            <button class="btn-secondary btn-sm mb-2" onclick="copyToClipboard(this.nextElementSibling.textContent, 'WHOIS data copied!')">
+                📋 Copy WHOIS
+            </button>
+            <pre class="whois-text">${escapeHtml(whoisText)}</pre>
         </div>
     `;
+    
+    return createExpandableSection(
+        'Whois Lookup',
+        content,
+        false // collapsed by default
+    );
+}
+
+/**
+ * Render IP Historical WHOIS section (lazy-load)
+ */
+function renderIpHistoricalWhois(attrs) {
+    const content = `
+        <div id="historical-whois-content">
+            <button 
+                class="btn-secondary" 
+                onclick="loadIpHistoricalWhois('${currentId}')"
+            >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
+                    <path d="M21 3v5h-5"></path>
+                </svg>
+                Load Historical WHOIS Records
+            </button>
+            <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.875rem;">Click to load historical WHOIS changes for this IP address</p>
+        </div>
+    `;
+    
+    return createExpandableSection(
+        'Whois results',
+        content,
+        false // collapsed by default
+    );
 }
 
 /**
@@ -986,18 +1254,37 @@ function renderBehaviorTab() {
  * Render relations tab content
  */
 function renderRelationsTab() {
-    if (currentType !== 'url') {
-        return createEmptyState('Relations view is only available for URLs');
+    if (currentType === 'url') {
+        return renderUrlRelations();
+    } else if (currentType === 'ip') {
+        return renderIpRelations();
+    } else {
+        return createEmptyState('Relations view is only available for URLs and IP addresses');
     }
-    
+}
+
+/**
+ * Render URL relations
+ */
+function renderUrlRelations() {
     const attrs = currentData.attributes;
     let sectionsHtml = '';
+    
+    // Add "Load All Relations" button at the top
+    sectionsHtml += `
+        <div class="load-all-relations-container">
+            <button class="btn-secondary" onclick="loadAllUrlRelations()">
+                Load All Relations
+            </button>
+            <span class="text-muted">Load all relationship data at once</span>
+        </div>
+    `;
     
     // 1. Outgoing Links (from primary endpoint - always available)
     sectionsHtml += renderOutgoingLinks(attrs);
     
     // 2. URLs Related by Tracker ID (lazy load section)
-    sectionsHtml += renderLazyLoadSection(
+    sectionsHtml += renderUrlLazyLoadSection(
         'urls-related-tracker',
         'URLs related by tracker ID',
         'Load related URLs',
@@ -1005,7 +1292,7 @@ function renderRelationsTab() {
     );
     
     // 3. Embedded JS Files (lazy load section)
-    sectionsHtml += renderLazyLoadSection(
+    sectionsHtml += renderUrlLazyLoadSection(
         'embedded-js-files',
         'Embedded JS Files',
         'Load JS files',
@@ -1013,7 +1300,7 @@ function renderRelationsTab() {
     );
     
     // 4. Downloaded Files (lazy load section)
-    sectionsHtml += renderLazyLoadSection(
+    sectionsHtml += renderUrlLazyLoadSection(
         'downloaded-files',
         'Downloaded Files',
         'Load files',
@@ -1021,7 +1308,7 @@ function renderRelationsTab() {
     );
     
     // 5. Communicating Files (lazy load section)
-    sectionsHtml += renderLazyLoadSection(
+    sectionsHtml += renderUrlLazyLoadSection(
         'communicating-files',
         'Communicating Files',
         'Load files',
@@ -1029,7 +1316,7 @@ function renderRelationsTab() {
     );
     
     // 6. Contacted Domains (lazy load section)
-    sectionsHtml += renderLazyLoadSection(
+    sectionsHtml += renderUrlLazyLoadSection(
         'contacted-domains',
         'Contacted Domains',
         'Load contacted domains',
@@ -1037,7 +1324,7 @@ function renderRelationsTab() {
     );
     
     // 7. Contacted IPs (lazy load section)
-    sectionsHtml += renderLazyLoadSection(
+    sectionsHtml += renderUrlLazyLoadSection(
         'contacted-ips',
         'Contacted IPs',
         'Load contacted IPs',
@@ -1048,44 +1335,137 @@ function renderRelationsTab() {
 }
 
 /**
+ * Render URL lazy load section (collapsible)
+ */
+function renderUrlLazyLoadSection(sectionId, title, buttonText, description) {
+    return `
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3 id="${sectionId}-title">${title}</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div class="section-content">
+                <div id="${sectionId}-content" class="lazy-section-content">
+                    <button class="btn-secondary" onclick="load${toCamelCase(sectionId)}()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
+                            <path d="M21 3v5h-5"></path>
+                        </svg>
+                        ${buttonText}
+                    </button>
+                    <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.875rem;">${description}</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Load all URL relations at once
+ */
+window.loadAllUrlRelations = async function() {
+    const relationships = [
+        { id: 'urls-related-tracker', func: 'loadUrlsRelatedTracker' },
+        { id: 'embedded-js-files', func: 'loadEmbeddedJsFiles' },
+        { id: 'downloaded-files', func: 'loadDownloadedFiles' },
+        { id: 'communicating-files', func: 'loadCommunicatingFiles' },
+        { id: 'contacted-domains', func: 'loadContactedDomains' },
+        { id: 'contacted-ips', func: 'loadContactedIps' }
+    ];
+    
+    showToast('Loading all relations...', 'info');
+    
+    // Load all relations in parallel
+    const promises = relationships.map(({ func }) => {
+        if (typeof window[func] === 'function') {
+            return window[func]().catch(err => {
+                console.error(`Failed to load ${func}:`, err);
+                return null;
+            });
+        }
+        return Promise.resolve();
+    });
+    
+    await Promise.all(promises);
+    showToast('All relations loaded!', 'success');
+};
+
+/**
+ * Render IP relations
+ */
+function renderIpRelations() {
+    let sectionsHtml = '';
+    
+    // Add "Load All Relations" button at the top
+    sectionsHtml += `
+        <div class="load-all-relations-container">
+            <button class="btn-secondary" onclick="loadAllIpRelations()">
+                Load All Relations
+            </button>
+            <span class="text-muted">Load all relationship data at once</span>
+        </div>
+    `;
+    
+    // 1. URLs (lazy load)
+    sectionsHtml += renderIpLazyLoadSection('urls', 'URLs', 'Load URLs hosted on this IP', 'Latest URLs scanned that were hosted in this IP address.');
+    
+    // 2. Passive DNS Replication (lazy load)
+    sectionsHtml += renderIpLazyLoadSection('resolutions', 'Passive DNS Replication', 'Load domains that resolved to this IP', 'The following domains resolved to the given IP address.');
+    
+    // 3. Communicating files (lazy load)
+    sectionsHtml += renderIpLazyLoadSection('communicating_files', 'Communicating files', 'Load files that communicate with this IP', 'Latest files that communicate with this IP address.');
+    
+    // 4. Referring files (lazy load)
+    sectionsHtml += renderIpLazyLoadSection('referrer_files', 'Referring files', 'Load files that reference this IP', 'Latest files where the given IP address is found in their contents.');
+    
+    // 5. Historical SSL certificates (lazy load)
+    sectionsHtml += renderIpLazyLoadSection('historical_ssl_certificates', 'Historical SSL certificates', 'Load SSL certificates for this IP');
+    
+    // 6. Historical whois updates (lazy load)  - same as Details tab but different display
+    sectionsHtml += renderIpLazyLoadSection('historical_whois', 'Historical whois updates', 'Load historical WHOIS records');
+    
+    // 7. Collections (lazy load)
+    sectionsHtml += renderIpLazyLoadSection('collections', 'Collections', 'Load threat intelligence collections');
+    
+    // 8. Related References (lazy load)
+    sectionsHtml += renderIpLazyLoadSection('related_references', 'Related References', 'Load threat intelligence reports');
+    
+    return sectionsHtml;
+}
+
+/**
  * Render Outgoing Links section
  */
 function renderOutgoingLinks(attrs) {
     const outgoingLinks = attrs.outgoing_links || [];
     
+    let content;
     if (outgoingLinks.length === 0) {
-        return `
-            <div class="card">
-                <div class="card-header">
-                    <h3 class="card-title">Outgoing Links (0)</h3>
-                </div>
-                <div class="card-body">
-                    ${createEmptyState('No outgoing links found')}
-                </div>
-            </div>
-        `;
+        content = '<p class="text-muted">No outgoing links found</p>';
+    } else {
+        const linksList = outgoingLinks
+            .map(url => {
+                // Encode URL for VT analysis
+                const encodedUrl = encodeUrlForVT(url);
+                return `
+                    <div class="outgoing-link-item">
+                        <a href="result.html?type=url&id=${encodedUrl}" class="outgoing-link">
+                            ${escapeHtml(url)}
+                        </a>
+                    </div>
+                `;
+            }).join('');
+        content = `<div class="outgoing-links-list">${linksList}</div>`;
     }
     
-    const linksList = outgoingLinks
-        .map(url => {
-            // Encode URL for VT analysis
-            const encodedUrl = encodeUrlForVT(url);
-            return `
-                <div class="outgoing-link-item">
-                    <a href="result.html?type=url&id=${encodedUrl}" class="outgoing-link">
-                        ${escapeHtml(url)}
-                    </a>
-                </div>
-            `;
-        }).join('');
-    
     return `
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">Outgoing Links (${outgoingLinks.length})</h3>
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3>Outgoing Links (${outgoingLinks.length})</h3>
+                <span class="chevron">▼</span>
             </div>
-            <div class="card-body">
-                <div class="outgoing-links-list">${linksList}</div>
+            <div class="section-content">
+                ${content}
             </div>
         </div>
     `;
@@ -1583,6 +1963,11 @@ function renderTelemetryTab() {
  * Render community tab content
  */
 function renderCommunityTab() {
+    if (currentType === 'ip') {
+        return renderIpCommunityTab();
+    }
+    
+    // Default community tab for other types
     // Load votes immediately, but comments on demand
     setTimeout(() => loadVotesSummary(), 100);
     
@@ -1608,6 +1993,59 @@ function renderCommunityTab() {
             </div>
         </div>
     `;
+}
+
+/**
+ * Render IP community tab
+ */
+function renderIpCommunityTab() {
+    let sectionsHtml = '';
+    
+    // 1. Voting details (lazy load)
+    sectionsHtml += `
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3 id="voting-details-title">Voting details</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div class="section-content">
+                <div id="voting-details-content">
+                    <button class="btn-secondary" onclick="loadIpVotingDetails()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
+                            <path d="M21 3v5h-5"></path>
+                        </svg>
+                        Load Voting Details
+                    </button>
+                    <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.875rem;">Click to load individual community votes</p>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 2. Comments (lazy load)
+    sectionsHtml += `
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3 id="comments-title">Comments</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div class="section-content">
+                <div id="comments-content">
+                    <button class="btn-secondary" onclick="loadCommentsSection()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
+                            <path d="M21 3v5h-5"></path>
+                        </svg>
+                        Load Comments
+                    </button>
+                    <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.875rem;">Click to load community comments and discussions</p>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    return sectionsHtml;
 }
 
 // ==================== Load Additional Data ====================
@@ -2191,195 +2629,6 @@ function renderRelationSection(relation) {
 }
 
 /**
- * Render URL relations
- */
-function renderUrlRelations(data) {
-    const rows = data.map(item => {
-        const attrs = item.attributes || {};
-        // Get URL - try multiple fields
-        const url = attrs.url || attrs.last_final_url || item.context_attributes?.url || item.id || 'N/A';
-        const stats = attrs.last_analysis_stats || {};
-        const malicious = stats.malicious || 0;
-        const total = Object.values(stats).reduce((a, b) => a + b, 0);
-        const tags = attrs.tags || [];
-        const relationDate = attrs.last_modification_date ? formatTimestamp(attrs.last_modification_date) : '';
-        
-        const tagBadges = tags.slice(0, 3).map(tag => 
-            `<span class="relation-tag">${escapeHtml(tag)}</span>`
-        ).join('');
-        
-        // Show detections only if we have stats
-        const detectionsHtml = total > 0 ? `<span class="relation-detections">${malicious}/${total}</span>` : '';
-        const dateHtml = relationDate ? `<span class="relation-date">${relationDate}</span>` : '';
-        
-        return `
-            <div class="relation-row">
-                <div class="relation-main">
-                    <div class="relation-url">
-                        <a href="result.html?type=url&id=${encodeURIComponent(item.id)}" target="_blank">
-                            ${escapeHtml(url)}
-                        </a>
-                    </div>
-                    ${tagBadges ? `<div class="relation-tags">${tagBadges}</div>` : ''}
-                </div>
-                <div class="relation-meta">
-                    ${detectionsHtml}
-                    ${dateHtml}
-                </div>
-            </div>
-        `;
-    }).join('');
-    
-    return `<div class="relation-list">${rows}</div>`;
-}
-
-/**
- * Render file relations
- */
-function renderFileRelations(data) {
-    const rows = data.map(item => {
-        const attrs = item.attributes || {};
-        const hash = item.id || 'N/A';
-        const stats = attrs.last_analysis_stats || {};
-        const malicious = stats.malicious || 0;
-        const total = Object.values(stats).reduce((a, b) => a + b, 0);
-        const fileType = attrs.type_description || 'Unknown';
-        
-        return `
-            <div class="relation-row">
-                <div class="relation-main">
-                    <div class="relation-hash">
-                        <code>${escapeHtml(hash)}</code>
-                    </div>
-                </div>
-                <div class="relation-meta">
-                    <span class="relation-detections">${malicious}/${total}</span>
-                    <span class="relation-type">${escapeHtml(fileType)}</span>
-                    <a href="result.html?type=hash&id=${encodeURIComponent(hash)}" target="_blank" class="btn-analyze">
-                        Analyze
-                    </a>
-                </div>
-            </div>
-        `;
-    }).join('');
-    
-    return `<div class="relation-list">${rows}</div>`;
-}
-
-/**
- * Render domain relations
- */
-function renderDomainRelations(data) {
-    const rows = data.map(item => {
-        const domain = item.id || 'N/A';
-        const attrs = item.attributes || {};
-        const stats = attrs.last_analysis_stats || {};
-        const malicious = stats.malicious || 0;
-        const total = Object.values(stats).reduce((a, b) => a + b, 0);
-        
-        return `
-            <div class="relation-row">
-                <div class="relation-main">
-                    <a href="result.html?type=domain&id=${encodeURIComponent(domain)}" target="_blank">
-                        ${escapeHtml(domain)}
-                    </a>
-                </div>
-                <div class="relation-meta">
-                    <span class="relation-detections">${malicious}/${total}</span>
-                </div>
-            </div>
-        `;
-    }).join('');
-    
-    return `<div class="relation-list">${rows}</div>`;
-}
-
-/**
- * Render IP relations
- */
-function renderIpRelations(data) {
-    const rows = data.map(item => {
-        const ip = item.id || 'N/A';
-        const attrs = item.attributes || {};
-        const stats = attrs.last_analysis_stats || {};
-        const malicious = stats.malicious || 0;
-        const total = Object.values(stats).reduce((a, b) => a + b, 0);
-        const country = attrs.country || '';
-        
-        return `
-            <div class="relation-row">
-                <div class="relation-main">
-                    <a href="result.html?type=ip&id=${encodeURIComponent(ip)}" target="_blank">
-                        ${escapeHtml(ip)}
-                    </a>
-                    ${country ? `<span class="relation-country">${escapeHtml(country)}</span>` : ''}
-                </div>
-                <div class="relation-meta">
-                    <span class="relation-detections">${malicious}/${total}</span>
-                </div>
-            </div>
-        `;
-    }).join('');
-    
-    return `<div class="relation-list">${rows}</div>`;
-}
-
-/**
- * Render resolution relations
- */
-function renderResolutionRelations(data) {
-    const rows = data.map(item => {
-        const attrs = item.attributes || {};
-        const ipAddress = attrs.ip_address || item.id || 'N/A';
-        const date = attrs.date ? formatTimestamp(attrs.date) : 'N/A';
-        
-        return `
-            <div class="relation-row">
-                <div class="relation-main">
-                    <a href="result.html?type=ip&id=${encodeURIComponent(ipAddress)}" target="_blank">
-                        ${escapeHtml(ipAddress)}
-                    </a>
-                </div>
-                <div class="relation-meta">
-                    <span class="relation-date">${date}</span>
-                </div>
-            </div>
-        `;
-    }).join('');
-    
-    return `<div class="relation-list">${rows}</div>`;
-}
-
-/**
- * Render generic relations (fallback for unknown types)
- */
-function renderGenericRelations(data) {
-    const rows = data.map(item => {
-        const id = item.id || 'N/A';
-        const attrs = item.attributes || {};
-        const type = item.type || 'unknown';
-        
-        // Try to get some meaningful info
-        const name = attrs.name || attrs.url || attrs.meaningful_name || id;
-        const stats = attrs.last_analysis_stats || {};
-        const malicious = stats.malicious || 0;
-        const total = Object.values(stats).reduce((a, b) => a + b, 0);
-        
-        return `
-            <div class="relation-row">
-                <div class="relation-main">
-                    <div>${escapeHtml(name)}</div>
-                    ${type !== 'unknown' ? `<small class="text-muted">Type: ${escapeHtml(type)}</small>` : ''}
-                </div>
-                ${total > 0 ? `<div class="relation-meta"><span class="relation-detections">${malicious}/${total}</span></div>` : ''}
-            </div>
-        `;
-    }).join('');
-    
-    return `<div class="relation-list">${rows}</div>`;
-}
-
-/**
  * Load content data on demand (URLs only)
  */
 window.loadContentData = async function() {
@@ -2638,19 +2887,6 @@ function formatRegion(attrs) {
 }
 
 /**
- * Get country flag emoji
- */
-function getCountryFlag(countryCode) {
-    if (!countryCode || countryCode.length !== 2) return '🌐';
-    
-    const codePoints = countryCode
-        .toUpperCase()
-        .split('')
-        .map(char => 127397 + char.charCodeAt());
-    return String.fromCodePoint(...codePoints);
-}
-
-/**
  * Get interface icon
  */
 function getInterfaceIcon(interfaceType) {
@@ -2730,45 +2966,139 @@ window.loadVotesSummary = async function() {
 };
 
 /**
+ * Load IP voting details
+ */
+window.loadIpVotingDetails = async function() {
+    const container = document.getElementById('voting-details-content');
+    const titleEl = document.getElementById('voting-details-title');
+    
+    if (!container) return;
+    
+    // Show loading
+    container.innerHTML = '<div class="loading-inline">Loading...</div>';
+    
+    try {
+        const votesData = currentData.attributes.total_votes || {};
+        const harmless = votesData.harmless || 0;
+        const malicious = votesData.malicious || 0;
+        const total = harmless + malicious;
+        
+        // Update title with count
+        if (titleEl) {
+            titleEl.textContent = `Voting details (${total})`;
+        }
+        
+        if (total === 0) {
+            container.innerHTML = '<p class="text-muted">No votes yet</p>';
+            return;
+        }
+        
+        // Render voting summary
+        let html = `
+            <div class="voting-details-summary">
+                <div class="vote-breakdown">
+                    <div class="vote-item vote-harmless">
+                        <span class="vote-icon">👍</span>
+                        <span class="vote-label">Harmless</span>
+                        <span class="vote-count">${harmless}</span>
+                    </div>
+                    <div class="vote-item vote-malicious">
+                        <span class="vote-icon">👎</span>
+                        <span class="vote-label">Malicious</span>
+                        <span class="vote-count">${malicious}</span>
+                    </div>
+                </div>
+                <p class="text-muted mt-3">Individual vote details are not available via the API. This shows the aggregate voting statistics.</p>
+            </div>
+        `;
+        
+        container.innerHTML = html;
+        
+    } catch (error) {
+        console.error('Error loading voting details:', error);
+        container.innerHTML = `<p class="text-error">Error loading voting details: ${escapeHtml(error.message)}</p>`;
+    }
+};
+
+/**
  * Load comments section on demand
  */
 window.loadCommentsSection = async function() {
-    const container = document.getElementById('community-comments-section');
+    // Check if this is for IP (new structure) or other types (old structure)
+    let container = document.getElementById('comments-content');
+    let titleEl = document.getElementById('comments-title');
+    
+    if (!container) {
+        // Fall back to old structure
+        container = document.getElementById('community-comments-section');
+    }
+    
     if (!container) return;
     
-    // Show loading state
-    container.innerHTML = `
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">Comments</h3>
-            </div>
-            <div class="card-body">
-                <div class="loading-spinner" style="margin: 2rem auto;"></div>
-                <p class="text-muted text-center">Loading comments...</p>
-            </div>
-        </div>
-    `;
+    const isNewStructure = titleEl !== null; // IP uses new structure
     
-    try {
-        const commentsResponse = await loadComments();
-        container.innerHTML = renderComments(commentsResponse);
-        showToast(`Loaded ${commentsResponse.data?.length || 0} comments`, 'success');
-    } catch (error) {
-        console.error('Error loading comments:', error);
+    // Show loading state
+    if (isNewStructure) {
+        container.innerHTML = '<div class="loading-inline">Loading...</div>';
+    } else {
         container.innerHTML = `
             <div class="card">
                 <div class="card-header">
                     <h3 class="card-title">Comments</h3>
                 </div>
                 <div class="card-body">
-                    <div class="error-message">
-                        <p><strong>Error</strong></p>
-                        <p>${escapeHtml(error.message)}</p>
-                        <button class="btn-secondary" onclick="loadCommentsSection()" style="margin-top: 1rem;">Retry</button>
-                    </div>
+                    <div class="loading-spinner" style="margin: 2rem auto;"></div>
+                    <p class="text-muted text-center">Loading comments...</p>
                 </div>
             </div>
         `;
+    }
+    
+    try {
+        const commentsResponse = await loadComments();
+        const commentCount = commentsResponse.data?.length || 0;
+        
+        // Update title if using new structure
+        if (titleEl) {
+            titleEl.textContent = `Comments (${commentCount})`;
+        }
+        
+        if (isNewStructure) {
+            // Simple structure for IPs
+            container.innerHTML = renderCommentsSimple(commentsResponse);
+        } else {
+            // Card structure for other types
+            container.innerHTML = renderComments(commentsResponse);
+        }
+        
+        showToast(`Loaded ${commentCount} comments`, 'success');
+    } catch (error) {
+        console.error('Error loading comments:', error);
+        
+        if (isNewStructure) {
+            container.innerHTML = `
+                <div class="error-message">
+                    <p>${escapeHtml(error.message)}</p>
+                    <button class="btn-secondary" onclick="loadCommentsSection()">Retry</button>
+                </div>
+            `;
+        } else {
+            container.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Comments</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="error-message">
+                            <p><strong>Error</strong></p>
+                            <p>${escapeHtml(error.message)}</p>
+                            <button class="btn-secondary" onclick="loadCommentsSection()" style="margin-top: 1rem;">Retry</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
         showToast('Failed to load comments', 'error');
     }
 };
@@ -2919,6 +3249,45 @@ function renderComments(commentsData) {
     `;
 }
 
+/**
+ * Render comments (simple version without card wrapper for IPs)
+ */
+function renderCommentsSimple(commentsData) {
+    if (!commentsData || !commentsData.data || commentsData.data.length === 0) {
+        return '<p class="text-muted">No comments yet</p>';
+    }
+    
+    const comments = commentsData.data.map(comment => {
+        const attrs = comment.attributes;
+        
+        // Format tags if present
+        const tagsHtml = attrs.tags && attrs.tags.length > 0 ? `
+            <div class="comment-tags">
+                ${attrs.tags.map(tag => `<span class="comment-tag">${escapeHtml(tag)}</span>`).join('')}
+            </div>
+        ` : '';
+        
+        return `
+            <div class="comment">
+                <div class="comment-header">
+                    <span class="comment-author">${escapeHtml(attrs.author || 'Anonymous')}</span>
+                    <span class="comment-date">${timeAgo(attrs.date)}</span>
+                </div>
+                <div class="comment-body">${escapeHtml(attrs.text || '')}</div>
+                ${tagsHtml}
+                ${attrs.votes ? `
+                    <div class="comment-votes">
+                        <span class="positive">👍 ${attrs.votes.positive || 0}</span>
+                        <span class="negative">👎 ${attrs.votes.negative || 0}</span>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }).join('');
+    
+    return `<div class="comments-list">${comments}</div>`;
+}
+
 // ==================== UI State Management ====================
 
 /**
@@ -3037,6 +3406,553 @@ function handleHeaderSearch() {
         window.location.href = `index.html#search=${encodeURIComponent(query)}`;
     }
 }
+
+// ==================== IP Relations Helper Functions ====================
+
+/**
+ * Render IP lazy load section (collapsible)
+ */
+function renderIpLazyLoadSection(relationship, title, description, tooltip = '') {
+    const sectionId = `ip-${relationship}`;
+    const tooltipHtml = tooltip ? `<span class="info-tooltip" title="${escapeHtml(tooltip)}">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <text x="8" y="12" text-anchor="middle" font-size="11" font-weight="bold">i</text>
+        </svg>
+    </span>` : '';
+    return `
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3 id="${sectionId}-title">${title} ${tooltipHtml}</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div class="section-content">
+                <div id="${sectionId}-content" class="lazy-section-content">
+                    <button class="btn-secondary" onclick="loadIpRelation('${relationship}', '${title}', '${sectionId}')">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
+                            <path d="M21 3v5h-5"></path>
+                        </svg>
+                        Load ${title}
+                    </button>
+                    <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.875rem;">${description}</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Load all IP relations at once
+ */
+window.loadAllIpRelations = async function() {
+    const relationships = [
+        { rel: 'urls', title: 'URLs', id: 'ip-urls' },
+        { rel: 'resolutions', title: 'Passive DNS Replication', id: 'ip-resolutions' },
+        { rel: 'communicating_files', title: 'Communicating files', id: 'ip-communicating_files' },
+        { rel: 'referrer_files', title: 'Referring files', id: 'ip-referrer_files' },
+        { rel: 'historical_ssl_certificates', title: 'Historical SSL certificates', id: 'ip-historical_ssl_certificates' },
+        { rel: 'historical_whois', title: 'Historical whois updates', id: 'ip-historical_whois' },
+        { rel: 'collections', title: 'Collections', id: 'ip-collections' },
+        { rel: 'related_references', title: 'Related References', id: 'ip-related_references' }
+    ];
+    
+    showToast('Loading all relations...', 'info');
+    
+    // Load all relations in parallel
+    const promises = relationships.map(({ rel, title, id }) => 
+        loadIpRelation(rel, title, id).catch(err => {
+            console.error(`Failed to load ${rel}:`, err);
+            return null;
+        })
+    );
+    
+    await Promise.all(promises);
+    showToast('All relations loaded!', 'success');
+};
+
+/**
+ * Load IP relationship data (generic handler)
+ */
+window.loadIpRelation = async function(relationship, title, sectionId) {
+    const container = document.getElementById(`${sectionId}-content`);
+    const titleEl = document.getElementById(`${sectionId}-title`);
+    
+    if (!container) return;
+    
+    // Show loading
+    container.innerHTML = '<div class="loading-inline">Loading...</div>';
+    
+    try {
+        // Load 20 for URLs, communicating_files, and referrer_files; 40 for others
+        const limit = (relationship === 'urls' || relationship === 'communicating_files' || relationship === 'referrer_files') ? 20 : 40;
+        const data = await vtClient.getIpRelationship(currentId, relationship, limit);
+        
+        // Update title with count - show loaded/total for URLs, communicating_files, and referrer_files
+        if (titleEl && data.meta && data.meta.count !== undefined) {
+            const tooltip = titleEl.querySelector('.info-tooltip');
+            const tooltipHtml = tooltip ? tooltip.outerHTML : '';
+            
+            if ((relationship === 'urls' || relationship === 'communicating_files' || relationship === 'referrer_files') && data.data) {
+                const loaded = data.data.length;
+                const total = data.meta.count;
+                titleEl.innerHTML = `${title} (${loaded}/${total}) ${tooltipHtml}`;
+            } else {
+                titleEl.innerHTML = `${title} (${data.meta.count}) ${tooltipHtml}`;
+            }
+        }
+        
+        // Render based on relationship type
+        let html = '';
+        
+        if (!data || !data.data || data.data.length === 0) {
+            html = '<p class="text-muted">No data found</p>';
+        } else {
+            switch (relationship) {
+                case 'urls':
+                    html = renderIpUrls(data);
+                    break;
+                case 'resolutions':
+                    html = renderIpResolutions(data);
+                    break;
+                case 'communicating_files':
+                case 'referrer_files':
+                    html = renderIpFiles(data);
+                    break;
+                case 'historical_ssl_certificates':
+                    html = renderIpSslCertificates(data);
+                    break;
+                case 'historical_whois':
+                    html = renderIpHistoricalWhoisTable(data);
+                    break;
+                case 'collections':
+                    html = renderIpCollections(data);
+                    break;
+                case 'related_references':
+                    html = renderIpReferences(data);
+                    break;
+                default:
+                    html = '<p class="text-muted">Not implemented yet</p>';
+            }
+        }
+        
+        container.innerHTML = html;
+        
+    } catch (error) {
+        console.error(`Error loading ${relationship}:`, error);
+        container.innerHTML = `<p class="text-error">Error loading data: ${escapeHtml(error.message)}</p>`;
+    }
+};
+
+/**
+ * Render IP URLs table
+ */
+function renderIpUrls(data) {
+    let html = '<table class="table relation-table"><thead><tr>';
+    html += '<th>Scanned</th><th>Detections</th><th>Status</th><th>URL</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.data.forEach((item, index) => {
+        const attrs = item.attributes;
+        const stats = attrs.last_analysis_stats || {};
+        const malicious = stats.malicious || 0;
+        const total = (stats.malicious || 0) + (stats.suspicious || 0) + (stats.undetected || 0) + (stats.harmless || 0);
+        const detectionClass = malicious > 0 ? 'text-error' : 'text-success';
+        
+        // Scanned date - format as YYYY-MM-DD
+        const scannedDate = attrs.last_analysis_date 
+            ? new Date(attrs.last_analysis_date * 1000).toISOString().split('T')[0]
+            : '-';
+        
+        // Status - HTTP response code or "-"
+        const status = attrs.last_http_response_code || attrs.last_final_url_http_response_code || '-';
+        
+        const url = attrs.url || item.id;
+        
+        html += `<tr>
+            <td>${scannedDate}</td>
+            <td class="${detectionClass}">${malicious} / ${total}</td>
+            <td>${escapeHtml(String(status))}</td>
+            <td><a href="result.html?type=url&id=${encodeURIComponent(item.id)}" target="_blank">${escapeHtml(url)}</a></td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Render IP Resolutions table (Passive DNS Replication)
+ */
+function renderIpResolutions(data) {
+    let html = '<table class="table relation-table"><thead><tr>';
+    html += '<th>Date resolved</th><th>Detections</th><th>Resolver</th><th>Domain</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.data.forEach((item, index) => {
+        const attrs = item.attributes;
+        const stats = attrs.host_name_last_analysis_stats || {};
+        const malicious = stats.malicious || 0;
+        const total = (stats.malicious || 0) + (stats.suspicious || 0) + (stats.undetected || 0) + (stats.harmless || 0);
+        const detectionClass = malicious > 0 ? 'text-error' : 'text-success';
+        
+        // Date resolved - format as YYYY-MM-DD
+        const dateResolved = attrs.date 
+            ? new Date(attrs.date * 1000).toISOString().split('T')[0]
+            : '-';
+        
+        const resolver = attrs.resolver || '-';
+        const hostName = attrs.host_name || '-';
+        
+        html += `<tr>
+            <td>${dateResolved}</td>
+            <td class="${detectionClass}">${malicious} / ${total}</td>
+            <td>${escapeHtml(resolver)}</td>
+            <td><a href="result.html?type=domain&id=${encodeURIComponent(hostName)}" target="_blank">${escapeHtml(hostName)}</a></td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Render IP Files table (communicating/referring)
+ */
+function renderIpFiles(data) {
+    let html = '<table class="table relation-table"><thead><tr>';
+    html += '<th>Scanned</th><th>Detections</th><th>Type</th><th>Name</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.data.forEach((item, index) => {
+        const attrs = item.attributes;
+        const stats = attrs.last_analysis_stats || {};
+        const malicious = stats.malicious || 0;
+        const total = (stats.malicious || 0) + (stats.suspicious || 0) + (stats.undetected || 0) + (stats.harmless || 0);
+        const detectionClass = malicious > 5 ? 'text-error' : malicious > 0 ? 'text-warning' : 'text-success';
+        
+        // Scanned date - format as YYYY-MM-DD
+        const scannedDate = attrs.last_analysis_date 
+            ? new Date(attrs.last_analysis_date * 1000).toISOString().split('T')[0]
+            : '-';
+        
+        const fileType = attrs.type_extension || attrs.type_description || '-';
+        const fileName = attrs.meaningful_name || (attrs.names && attrs.names[0]) || item.id.substring(0, 16) + '...';
+        
+        html += `<tr>
+            <td>${scannedDate}</td>
+            <td class="${detectionClass}">${malicious} / ${total}</td>
+            <td>${escapeHtml(fileType)}</td>
+            <td><a href="result.html?type=file&id=${item.id}" target="_blank" title="${item.id}">${escapeHtml(fileName)}</a></td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Render SSL Certificates table
+ */
+function renderIpSslCertificates(data) {
+    let html = '<table class="table relation-table"><thead><tr>';
+    html += '<th>№</th><th>Valid From</th><th>Valid To</th><th>Serial</th><th>Common Name</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.data.forEach((item, index) => {
+        const attrs = item.attributes;
+        const validFrom = attrs.validity ? formatTimestamp(attrs.validity.not_before) : '-';
+        const validTo = attrs.validity ? formatTimestamp(attrs.validity.not_after) : '-';
+        const serial = attrs.serial_number || '-';
+        const commonName = attrs.subject_cn || (attrs.subject && attrs.subject.CN) || '-';
+        
+        html += `<tr>
+            <td>${index + 1}</td>
+            <td>${validFrom}</td>
+            <td>${validTo}</td>
+            <td title="${escapeHtml(serial)}">${escapeHtml(serial.substring(0, 16))}...</td>
+            <td>${escapeHtml(commonName)}</td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Render Historical WHOIS as table (for Relations tab)
+ */
+function renderIpHistoricalWhoisTable(data) {
+    let html = '<table class="table relation-table"><thead><tr>';
+    html += '<th>№</th><th>First Seen</th><th>Last Updated</th><th>Country</th><th>Key Changes</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.data.forEach((item, index) => {
+        const attrs = item.attributes;
+        const firstSeen = attrs.first_seen_date ? formatTimestamp(attrs.first_seen_date) : '-';
+        const lastUpdated = attrs.last_updated ? formatTimestamp(attrs.last_updated) : '-';
+        const country = attrs.registrant_country || '-';
+        
+        let keyChanges = '-';
+        if (attrs.whois_map) {
+            const whoisMap = attrs.whois_map;
+            keyChanges = whoisMap.netname || whoisMap.organization || whoisMap['Organization Name'] || '-';
+        }
+        
+        html += `<tr>
+            <td>${index + 1}</td>
+            <td>${firstSeen}</td>
+            <td>${lastUpdated}</td>
+            <td>${escapeHtml(country)}</td>
+            <td>${escapeHtml(keyChanges)}</td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Render Collections (card-based)
+ */
+function renderIpCollections(data) {
+    let html = '<div class="collections-list">';
+    
+    data.data.forEach(item => {
+        const attrs = item.attributes;
+        const counters = attrs.counters || {};
+        
+        // Format dates
+        const creationDate = attrs.creation_date ? formatTimestamp(attrs.creation_date) : null;
+        const modificationDate = attrs.last_modification_date ? formatTimestamp(attrs.last_modification_date) : null;
+        
+        // Prepare tags
+        const tags = attrs.autogenerated_tags || [];
+        const tagBadges = tags.slice(0, 8).map(tag => 
+            `<span class="collection-tag">${escapeHtml(tag)}</span>`
+        ).join('');
+        
+        // Alt names
+        const altNames = attrs.alt_names || [];
+        const altNamesText = altNames.length > 0 
+            ? `<div class="collection-alt-names"><strong>Alt Names:</strong> ${altNames.map(n => escapeHtml(n)).join(', ')}</div>`
+            : '';
+        
+        html += `
+            <div class="collection-card">
+                <div class="collection-header">
+                    <div class="collection-title">
+                        <strong>${escapeHtml(attrs.name || 'Unnamed Collection')}</strong>
+                        <span class="collection-type">${escapeHtml(attrs.collection_type || 'collection')}</span>
+                    </div>
+                    ${attrs.origin ? `<span class="collection-origin">${escapeHtml(attrs.origin)}</span>` : ''}
+                </div>
+                
+                ${attrs.description ? `<div class="collection-description">${escapeHtml(attrs.description)}</div>` : ''}
+                
+                ${counters.files || counters.domains || counters.ip_addresses || counters.urls ? `
+                    <div class="collection-counters">
+                        <strong>Counters:</strong>
+                        ${counters.files ? `<span>Files: ${counters.files}</span>` : ''}
+                        ${counters.domains ? `<span>Domains: ${counters.domains}</span>` : ''}
+                        ${counters.ip_addresses ? `<span>IPs: ${counters.ip_addresses}</span>` : ''}
+                        ${counters.urls ? `<span>URLs: ${counters.urls}</span>` : ''}
+                    </div>
+                ` : ''}
+                
+                ${tagBadges ? `
+                    <div class="collection-tags">
+                        <strong>Tags:</strong>
+                        <div class="collection-tags-list">${tagBadges}</div>
+                    </div>
+                ` : ''}
+                
+                ${altNamesText}
+                
+                <div class="collection-dates">
+                    ${creationDate ? `<span><strong>Created:</strong> ${creationDate}</span>` : ''}
+                    ${modificationDate ? `<span><strong>Modified:</strong> ${modificationDate}</span>` : ''}
+                </div>
+                
+                ${attrs.link ? `
+                    <div class="collection-actions">
+                        <a href="${escapeHtml(attrs.link)}" target="_blank" class="btn-secondary btn-sm">
+                            🔗 Reference link
+                        </a>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    return html;
+}
+
+/**
+ * Render Related References (list-based)
+ */
+function renderIpReferences(data) {
+    let html = '<div class="references-list">';
+    
+    data.data.forEach(item => {
+        const attrs = item.attributes || item;
+        
+        html += `
+            <div class="reference-item">
+                <div class="reference-title">📄 ${escapeHtml(attrs.title || attrs.source || 'Reference')}</div>
+                ${attrs.source ? `<div class="reference-source">Source: ${escapeHtml(attrs.source)}</div>` : ''}
+                ${attrs.description ? `<div class="reference-description">${escapeHtml(attrs.description)}</div>` : ''}
+                ${attrs.url ? `<div class="reference-link"><a href="${escapeHtml(attrs.url)}" target="_blank">View Reference →</a></div>` : ''}
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    return html;
+}
+
+// ==================== IP-specific Helper Functions ====================
+
+/**
+ * Copy text to clipboard
+ * @param {string} text - Text to copy
+ * @param {string} successMessage - Message to show on success
+ */
+window.copyToClipboard = async function(text, successMessage = 'Copied to clipboard!') {
+    try {
+        await navigator.clipboard.writeText(text);
+        showToast(successMessage);
+    } catch (err) {
+        console.error('Failed to copy:', err);
+        showToast('Failed to copy to clipboard', 'error');
+    }
+};
+
+// Store WHOIS data globally to avoid HTML attribute encoding issues
+window.historicalWhoisData = [];
+
+/**
+ * Load historical WHOIS data for IP
+ * @param {string} ip - IP address
+ */
+window.loadIpHistoricalWhois = async function(ip) {
+    const container = document.getElementById('historical-whois-content');
+    if (!container) return;
+    
+    // Show loading state
+    container.innerHTML = '<div class="loading-inline">Loading historical WHOIS records...</div>';
+    
+    try {
+        const data = await vtClient.getIpRelationship(ip, 'historical_whois', 40);
+        
+        if (!data || !data.data || data.data.length === 0) {
+            container.innerHTML = '<p class="text-muted">No historical WHOIS records found</p>';
+            return;
+        }
+        
+        // Store WHOIS data globally for access by toggle function
+        window.historicalWhoisData = data.data.map(record => record.attributes.whois_map || {});
+        
+        // Render historical WHOIS records
+        let html = `<div class="historical-whois-records">`;
+        
+        data.data.forEach((record, index) => {
+            const attrs = record.attributes;
+            const firstSeen = attrs.first_seen_date ? formatTimestamp(attrs.first_seen_date) : 'N/A';
+            const lastUpdated = attrs.last_updated ? formatTimestamp(attrs.last_updated) : 'N/A';
+            const country = attrs.registrant_country || 'Unknown';
+            
+            // Extract key fields from whois_map
+            let keyChanges = '';
+            if (attrs.whois_map) {
+                const whoisMap = attrs.whois_map;
+                keyChanges = '<div class="whois-key-changes"><strong>Key Changes:</strong><ul>';
+                
+                // Show important fields
+                if (whoisMap.netname) keyChanges += `<li>netname: ${escapeHtml(whoisMap.netname)}</li>`;
+                if (whoisMap.inetnum) keyChanges += `<li>inetnum: ${escapeHtml(whoisMap.inetnum)}</li>`;
+                if (whoisMap.Organization) keyChanges += `<li>organization: ${escapeHtml(whoisMap.Organization)}</li>`;
+                if (whoisMap['Organization Name']) keyChanges += `<li>organization: ${escapeHtml(whoisMap['Organization Name'])}</li>`;
+                if (whoisMap.descr) keyChanges += `<li>description: ${escapeHtml(whoisMap.descr)}</li>`;
+                
+                keyChanges += '</ul></div>';
+            }
+            
+            html += `
+                <div class="whois-record-card">
+                    <div class="whois-record-header">
+                        <strong>Record ${index + 1}</strong>
+                        <span class="text-muted">Country: ${escapeHtml(country)}</span>
+                    </div>
+                    <div class="whois-record-body">
+                        <div class="whois-dates">
+                            <div>First Seen: ${firstSeen}</div>
+                            <div>Last Updated: ${lastUpdated}</div>
+                        </div>
+                        ${keyChanges}
+                        <button 
+                            class="btn-secondary btn-sm mt-2" 
+                            onclick="toggleWhoisFull(${index})"
+                        >
+                            View Full Record
+                        </button>
+                        <div id="whois-full-${index}" class="whois-full-content hidden"></div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += '</div>';
+        container.innerHTML = html;
+        
+    } catch (error) {
+        console.error('Error loading historical WHOIS:', error);
+        container.innerHTML = `<p class="text-error">Error loading historical WHOIS: ${escapeHtml(error.message)}</p>`;
+    }
+};
+
+/**
+ * Toggle full WHOIS record display
+ */
+window.toggleWhoisFull = function(index) {
+    const container = document.getElementById(`whois-full-${index}`);
+    const button = event.target; // Get the button that was clicked
+    
+    if (!container || !button) return;
+    
+    if (container.classList.contains('hidden')) {
+        // Show full record from global data
+        try {
+            const whoisData = window.historicalWhoisData[index];
+            
+            if (!whoisData) {
+                container.innerHTML = '<p class="text-error">WHOIS data not found</p>';
+                container.classList.remove('hidden');
+                return;
+            }
+            
+            let html = '<pre class="whois-text mt-2">';
+            
+            for (const [key, value] of Object.entries(whoisData)) {
+                html += `${escapeHtml(key)}: ${escapeHtml(String(value))}\n`;
+            }
+            
+            html += '</pre>';
+            container.innerHTML = html;
+            container.classList.remove('hidden');
+            button.textContent = 'Hide Full Record';
+        } catch (error) {
+            console.error('Error displaying WHOIS data:', error);
+            container.innerHTML = '<p class="text-error">Error displaying WHOIS data</p>';
+            container.classList.remove('hidden');
+        }
+    } else {
+        // Hide full record
+        container.classList.add('hidden');
+        button.textContent = 'View Full Record';
+    }
+};
 
 // ==================== Start Application ====================
 
