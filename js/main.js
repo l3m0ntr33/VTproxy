@@ -82,9 +82,6 @@ function checkEnvironment() {
         apiKeyBtn.style.opacity = '0.5';
         apiKeyBtn.style.cursor = 'not-allowed';
         
-        // Show warning message
-        showToast('⚠️ API search disabled: VirusTotal blocks API requests from non-localhost domains due to CORS policy. Use the VT button to open in VirusTotal, or download the desktop app for full functionality.', 'warning', 10000);
-        
         // Add persistent warning below search
         const warning = document.createElement('div');
         warning.className = 'cors-warning';
