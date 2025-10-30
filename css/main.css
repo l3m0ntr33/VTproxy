@@ -338,7 +338,7 @@ input, textarea, select {
 
 .search-input {
     width: 100%;
-    padding: 1rem 6.5rem 1rem 1.5rem;
+    padding: 0.5rem 6.5rem 0.5rem 1.5rem;
     background: var(--bg-secondary);
     border: 2px solid var(--bg-tertiary);
     border-radius: var(--radius-lg);
@@ -346,6 +346,12 @@ input, textarea, select {
     font-size: 1rem;
     outline: none;
     transition: border-color var(--transition-base);
+    resize: vertical;
+    overflow-y: auto;
+    min-height: 5rem;
+    max-height: 15rem;
+    line-height: 1.5;
+    font-family: inherit;
 }
 
 .search-input:focus {
@@ -354,6 +360,30 @@ input, textarea, select {
 
 .search-input::placeholder {
     color: var(--text-muted);
+}
+
+/* Custom scrollbar for search input */
+.search-input::-webkit-scrollbar {
+    width: 8px;
+}
+
+.search-input::-webkit-scrollbar-track {
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+}
+
+.search-input::-webkit-scrollbar-thumb {
+    background: var(--gray);
+    border-radius: 4px;
+    transition: background var(--transition-base);
+}
+
+.search-input::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
+}
+
+.search-input::-webkit-scrollbar-corner {
+    background: var(--bg-tertiary);
 }
 
 .search-btn {

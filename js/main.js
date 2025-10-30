@@ -6,6 +6,15 @@ import { getApiKey, saveApiKey, clearApiKey, hasApiKey } from './utils/storage.j
 import { detectInputType, validateInput, getTypeLabel, detectHashType } from './utils/inputDetector.js';
 import { encodeUrlForVT } from './api/urlEncoder.js';
 import { processDefangedInput, getDefangingMessage } from './utils/defanger.js';
+import { 
+    parseMultilineInput, 
+    processBatchInput, 
+    isBatchInput, 
+    getBatchSummary, 
+    getBatchErrorDetails,
+    processBatchForVT,
+    openMultipleTabs
+} from './utils/batchProcessor.js';
 
 // DOM Elements
 const searchInput = document.getElementById('search-input');
@@ -29,6 +38,7 @@ const hashWarningCancel = document.getElementById('hash-warning-cancel');
 // State
 let isApiDisabledDueToCors = false;
 let pendingSearchData = null; // Store search data when showing hash warning
+let isBatchMode = false; // Track if we're in batch mode
 
 // ==================== Initialization ====================
 
@@ -136,6 +146,7 @@ function init() {
     // Event listeners
     searchInput.addEventListener('input', handleInputChange);
     searchInput.addEventListener('keypress', handleKeyPress);
+    searchInput.addEventListener('paste', handlePaste);
     searchBtn.addEventListener('click', handleSearch);
     vtBtn.addEventListener('click', handleOpenInVT);
     apiKeyBtn.addEventListener('click', openApiKeyModal);
@@ -275,39 +286,73 @@ function handleInputChange() {
     
     if (!input) {
         typeIndicator.classList.add('hidden');
+        isBatchMode = false;
         return;
     }
     
-    // Process defanged input for detection
-    const processed = processDefangedInput(input);
-    const type = detectInputType(processed.input);
+    // Check if we're in batch mode
+    isBatchMode = isBatchInput(input);
     
-    if (type !== 'unknown') {
-        let message = `Detected: ${getTypeLabel(type)}`;
-        if (processed.wasDefanged) {
-            message += ` (defanged input restored)`;
-        }
-        typeIndicator.textContent = message;
+    if (isBatchMode) {
+        // Process batch input
+        const batchResults = processBatchInput(input);
+        const summary = getBatchSummary(batchResults);
+        
+        typeIndicator.textContent = summary;
         typeIndicator.classList.remove('hidden');
         
-        // Show defanged restoration message in toast if defanged
-        if (processed.wasDefanged) {
-            const defangingMessage = getDefangingMessage(processed.original, processed.input);
-            if (defangingMessage) {
-                // Briefly show the defanging message
-                showToast(defangingMessage, 'info', 2000);
-            }
+        // Show defanged restoration message for batch if any items were defanged
+        const defangedItems = batchResults.valid.filter(item => item.wasDefanged);
+        if (defangedItems.length > 0) {
+            // List the defanged items that were restored
+            const defangedList = defangedItems.map(item => `"${item.originalLine}" → "${item.processed.input}"`).join(', ');
+            showToast(`${defangedItems.length} defanged input${defangedItems.length > 1 ? 's' : ''} restored: ${defangedList}`, 'info', 3000);
         }
     } else {
-        typeIndicator.classList.add('hidden');
+        // Single input mode
+        const processed = processDefangedInput(input);
+        const type = detectInputType(processed.input);
+        
+        if (type !== 'unknown') {
+            let message = `Detected: ${getTypeLabel(type)}`;
+            if (processed.wasDefanged) {
+                message += ` (defanged input restored)`;
+            }
+            typeIndicator.textContent = message;
+            typeIndicator.classList.remove('hidden');
+            
+            // Show defanged restoration message in toast if defanged
+            if (processed.wasDefanged) {
+                const defangingMessage = getDefangingMessage(processed.original, processed.input);
+                if (defangingMessage) {
+                    // Briefly show the defanging message
+                    showToast(defangingMessage, 'info', 2000);
+                }
+            }
+        } else {
+            typeIndicator.classList.add('hidden');
+        }
     }
+}
+
+/**
+ * Handle paste event to detect batch content
+ */
+function handlePaste(e) {
+    // Use setTimeout to get the pasted content after it's inserted
+    setTimeout(() => {
+        handleInputChange();
+    }, 10);
 }
 
 /**
  * Handle Enter key press
  */
 function handleKeyPress(e) {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        // Prevent default to avoid new line in single-item mode
+        e.preventDefault();
+        
         // If API is disabled due to CORS, use VT button instead
         if (isApiDisabledDueToCors) {
             handleOpenInVT();
@@ -315,12 +360,33 @@ function handleKeyPress(e) {
             handleSearch();
         }
     }
+    // Allow Shift+Enter to create new lines in textarea
 }
 
 /**
  * Handle search
  */
 function handleSearch() {
+    const input = searchInput.value.trim();
+    
+    if (!input) {
+        showToast('Please enter a file hash, URL, domain, or IP address', 'error');
+        return;
+    }
+    
+    if (isBatchMode) {
+        // Handle batch search
+        handleBatchSearch();
+    } else {
+        // Handle single search
+        handleSingleSearch();
+    }
+}
+
+/**
+ * Handle single item search
+ */
+function handleSingleSearch() {
     const input = searchInput.value.trim();
     
     // Validate input
@@ -338,7 +404,7 @@ function handleSearch() {
     }
     
     // Use the processed input for navigation
-    const searchInput = validation.processed || input;
+    const processedInput = validation.processed || input;
     
     // Show defanged message if applicable
     if (validation.wasDefanged) {
@@ -349,7 +415,144 @@ function handleSearch() {
     }
     
     // Navigate to results page
-    navigateToResults(validation.type, searchInput);
+    navigateToResults(validation.type, processedInput);
+}
+
+/**
+ * Handle batch search
+ */
+async function handleBatchSearch() {
+    const input = searchInput.value.trim();
+    
+    // Process batch input
+    const batchResults = processBatchInput(input);
+    
+    if (batchResults.valid.length === 0) {
+        showToast('No valid items found to process', 'error');
+        return;
+    }
+    
+    // Show error details for invalid items if any
+    if (batchResults.invalid.length > 0) {
+        const errorDetails = getBatchErrorDetails(batchResults.invalid);
+        showToast(errorDetails, 'warning', 5000);
+    }
+    
+    // Check if API key exists
+    if (!hasApiKey()) {
+        showToast('Please configure your API key first', 'error');
+        openApiKeyModal();
+        return;
+    }
+    
+    // Show progress message
+    showToast(`Processing ${batchResults.valid.length} items...`, 'info');
+    
+    // Process batch and open results
+    try {
+        await processBatchAndOpenResults(batchResults.valid);
+    } catch (error) {
+        console.error('Batch processing failed:', error);
+        showToast('Batch processing failed. Please try again.', 'error');
+    }
+}
+
+/**
+ * Process batch items and open results in multiple tabs
+ */
+async function processBatchAndOpenResults(validItems) {
+    const urls = [];
+    
+    // Generate URLs for all valid items
+    for (const item of validItems) {
+        const baseUrl = 'result.html';
+        let id = item.processed.input;
+        
+        // For URLs, encode them
+        if (item.validation.type === 'url') {
+            try {
+                id = encodeUrlForVT(item.processed.input);
+            } catch (error) {
+                console.error('Failed to encode URL:', item.processed.input);
+                continue;
+            }
+        }
+        
+        const url = `${baseUrl}?type=${item.validation.type}&id=${encodeURIComponent(id)}`;
+        urls.push(url);
+    }
+    
+    // Try to open tabs, fallback to clipboard if blocked
+    let openedCount = 0;
+    const totalCount = urls.length;
+    let popupBlocked = false;
+    
+    for (let i = 0; i < urls.length; i++) {
+        const url = urls[i];
+        
+        try {
+            const newWindow = window.open(url, '_blank');
+            if (newWindow === null || typeof newWindow === 'undefined') {
+                popupBlocked = true;
+                break;
+            }
+            openedCount++;
+            
+            // Update progress
+            if (i === 0 || i === urls.length - 1 || i % 5 === 0) {
+                showToast(`Opened ${openedCount}/${totalCount} tabs...`, 'info', 1000);
+            }
+        } catch (error) {
+            console.error('Failed to open tab:', url, error);
+            popupBlocked = true;
+            break;
+        }
+        
+        // Add small delay between openings
+        if (i < urls.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+    }
+    
+    // If popup was blocked, offer clipboard alternative
+    if (popupBlocked && urls.length > openedCount) {
+        const remainingUrls = urls.slice(openedCount);
+        await offerClipboardAlternative(remainingUrls, totalCount, openedCount);
+    } else {
+        // Show final success message
+        showToast(`Successfully opened ${openedCount} tabs`, 'success', 3000);
+    }
+}
+
+/**
+ * Offer clipboard alternative when popup blocker is detected
+ */
+async function offerClipboardAlternative(urls, totalCount, openedCount) {
+    const urlsText = urls.join('\n');
+    
+    try {
+        await navigator.clipboard.writeText(urlsText);
+        
+        const message = `Popup blocker detected! ${openedCount} tabs opened successfully.\n\n` +
+                       `The remaining ${urls.length} URLs have been copied to your clipboard.\n\n` +
+                       `You can paste them in your browser to open them manually.`;
+        
+        showToast(message, 'warning', 8000);
+        
+        // Also show in a more user-friendly way
+        setTimeout(() => {
+            alert(`${message}\n\nURLs copied to clipboard:\n${urlsText}`);
+        }, 1000);
+        
+    } catch (clipboardError) {
+        console.error('Failed to copy to clipboard:', clipboardError);
+        
+        // Fallback: show URLs in a modal or alert
+        const message = `Popup blocker detected! ${openedCount} tabs opened successfully.\n\n` +
+                       `Please copy these URLs manually to open the remaining ${urls.length} items:`;
+        
+        alert(`${message}\n\n${urlsText}`);
+    }
 }
 
 /**
@@ -378,6 +581,26 @@ function navigateToResults(type, input) {
  * Handle opening in VirusTotal
  */
 async function handleOpenInVT() {
+    const input = searchInput.value.trim();
+    
+    if (!input) {
+        showToast('Please enter a file hash, URL, domain, or IP address', 'error');
+        return;
+    }
+    
+    if (isBatchMode) {
+        // Handle batch VT opening
+        await handleBatchOpenInVT();
+    } else {
+        // Handle single VT opening
+        await handleSingleOpenInVT();
+    }
+}
+
+/**
+ * Handle single item VT opening
+ */
+async function handleSingleOpenInVT() {
     const input = searchInput.value.trim();
     
     // Validate input
@@ -409,6 +632,83 @@ async function handleOpenInVT() {
     
     // Open in VirusTotal
     openInVirusTotal(validation.type, vtInput);
+}
+
+/**
+ * Handle batch VT opening
+ */
+async function handleBatchOpenInVT() {
+    const input = searchInput.value.trim();
+    
+    // Process batch input
+    const batchResults = processBatchInput(input);
+    
+    if (batchResults.valid.length === 0) {
+        showToast('No valid items found to process', 'error');
+        return;
+    }
+    
+    // Show error details for invalid items if any
+    if (batchResults.invalid.length > 0) {
+        const errorDetails = getBatchErrorDetails(batchResults.invalid);
+        showToast(errorDetails, 'warning', 5000);
+    }
+    
+    // Show progress message
+    showToast(`Opening ${batchResults.valid.length} items in VirusTotal...`, 'info');
+    
+    // Generate VT URLs and open tabs
+    const urls = [];
+    
+    for (const item of batchResults.valid) {
+        try {
+            const url = generateVTUrl(item.validation.type, item.processed.input);
+            urls.push(url);
+        } catch (error) {
+            console.error('Failed to generate VT URL for item:', item, error);
+        }
+    }
+    
+    // Open all VT URLs with progress feedback
+    let openedCount = 0;
+    const totalCount = urls.length;
+    let popupBlocked = false;
+    
+    for (let i = 0; i < urls.length; i++) {
+        const url = urls[i];
+        
+        try {
+            const newWindow = window.open(url, '_blank');
+            if (newWindow === null || typeof newWindow === 'undefined') {
+                popupBlocked = true;
+                break;
+            }
+            openedCount++;
+            
+            // Update progress
+            if (i === 0 || i === urls.length - 1 || i % 3 === 0) {
+                showToast(`Opened ${openedCount}/${totalCount} VT tabs...`, 'info', 1000);
+            }
+        } catch (error) {
+            console.error('Failed to open VT tab:', url, error);
+            popupBlocked = true;
+            break;
+        }
+        
+        // Add delay between VT openings
+        if (i < urls.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+        }
+    }
+    
+    // If popup was blocked, offer clipboard alternative
+    if (popupBlocked && urls.length > openedCount) {
+        const remainingUrls = urls.slice(openedCount);
+        await offerClipboardAlternative(remainingUrls, totalCount, openedCount);
+    } else {
+        // Show final success message
+        showToast(`Successfully opened ${openedCount} VirusTotal tabs`, 'success', 3000);
+    }
 }
 
 /**

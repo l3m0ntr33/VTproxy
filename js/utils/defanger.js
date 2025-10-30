@@ -18,20 +18,27 @@ export function isDefanged(input) {
     // Common defanging patterns
     const defangingPatterns = [
         // URL defanging
-        /\[?\.\]?/g,  // hxxp://example[.]com or hxxp://example. com
         /hxxps?:\/\//i,  // hxxp:// or hxxps://
         /\[\/\]/g,  // [//] instead of //
         /:\/\[\//g,  // :/[//] instead of ://
         
-        // IP defanging
+        // IP defanging - only bracketed dots
         /\[\.\]/g,  // 192[.]168[.]1[.]1
-        /\./g,     // 192.168.1.1 (check if this is used in defanging context)
         
         // Domain defanging
         /\[\.com\]/i,  // example[.com]
         /\[\.org\]/i,  // example[.org]
         /\[\.net\]/i,  // example[.net]
-        /\[\.]/g,      // example[.]com
+        /\[\.edu\]/i,  // example[.edu]
+        /\[\.gov\]/i,  // example[.gov]
+        /\[\.io\]/i,  // example[.io]
+        /\[\.co\]/i,  // example[.co]
+        /\[\.uk\]/i,  // example[.uk]
+        /\[\.de\]/i,  // example[.de]
+        /\[\.fr\]/i,  // example[.fr]
+        /\[\.jp\]/i,  // example[.jp]
+        /\[\.cn\]/i,  // example[.cn]
+        /\[\.ru\]/i,  // example[.ru]
         
         // Protocol defanging
         /hxxp/i,       // hxxp instead of http

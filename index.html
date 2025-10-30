@@ -50,21 +50,21 @@
             <!-- Search Section -->
             <div class="search-section">
                 <div class="search-container">
-                    <input 
-                        type="text" 
+                    <textarea 
                         id="search-input" 
                         class="search-input"
-                        placeholder="Search or scan a file hash, URL, IP address, or domain"
+                        placeholder="Search or scan a file hash, URL, IP address, or domain&#10;You can also paste multiple lines, one value per line, to open multiple tabs"
                         autocomplete="off"
                         spellcheck="false"
-                    >
-                    <button id="search-btn" class="search-btn" title="Use my API key to get data">
+                        rows="3"
+                    ></textarea>
+                    <button id="search-btn" class="search-btn" title="Use my API key to get data (supports multiple items)">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="11" cy="11" r="8"></circle>
                             <path d="m21 21-4.35-4.35"></path>
                         </svg>
                     </button>
-                    <button id="vt-btn" class="vt-btn" title="Open in VirusTotal">
+                    <button id="vt-btn" class="vt-btn" title="Open in VirusTotal (supports multiple items)">
                         VT
                     </button>
                 </div>
@@ -80,6 +80,8 @@
                         <li><strong>URL:</strong> http:// or https:// (defanged URLs like hxxp://example[.]com are supported)</li>
                         <li><strong>Domain:</strong> example.com (defanged domains like example[.]com are supported)</li>
                         <li><strong>IP:</strong> IPv4 or IPv6 address (defanged IPs like 192[.]168[.]1[.]1 are supported)</li>
+                        <li><strong>Batch mode:</strong> Paste multiple lines, one value per line, to open multiple tabs</li>
+                        <li><strong>Popup blockers:</strong> May block multiple tabs - URLs will be copied to clipboard as fallback</li>
                     </ul>
                 </div>
             </div>
