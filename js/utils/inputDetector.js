@@ -2,6 +2,8 @@
  * Detect input type (hash, url, domain, ip)
  */
 
+import { processDefangedInput } from './defanger.js';
+
 /**
  * Detect the type of input
  * @param {string} input - User input string
@@ -12,7 +14,9 @@ export function detectInputType(input) {
         return 'unknown';
     }
     
-    const trimmed = input.trim();
+    // Process defanged input first
+    const processed = processDefangedInput(input);
+    const trimmed = processed.input;
     
     // Hash: 32 (MD5), 40 (SHA-1), or 64 (SHA-256) hex characters
     if (/^[a-fA-F0-9]{32}$/.test(trimmed)) {
@@ -65,7 +69,9 @@ export function detectHashType(input) {
         return null;
     }
     
-    const trimmed = input.trim();
+    // Process defanged input first (though hashes are rarely defanged)
+    const processed = processDefangedInput(input);
+    const trimmed = processed.input;
     
     // MD5: 32 hex characters
     if (/^[a-fA-F0-9]{32}$/.test(trimmed)) {
@@ -102,30 +108,46 @@ export function getTypeLabel(type) {
 /**
  * Validate input before search
  * @param {string} input - User input
- * @returns {{valid: boolean, type: string, message: string}}
+ * @returns {{valid: boolean, type: string, message: string, wasDefanged: boolean, original: string, processed: string}}
  */
 export function validateInput(input) {
     if (!input || !input.trim()) {
         return {
             valid: false,
             type: 'unknown',
-            message: 'Please enter a file hash, URL, domain, or IP address'
+            message: 'Please enter a file hash, URL, domain, or IP address',
+            wasDefanged: false,
+            original: input,
+            processed: input
         };
     }
     
-    const type = detectInputType(input);
+    // Process defanged input
+    const processed = processDefangedInput(input);
+    const type = detectInputType(processed.input);
     
     if (type === 'unknown') {
         return {
             valid: false,
             type: 'unknown',
-            message: 'Invalid input format. Please enter a valid file hash, URL, domain, or IP address'
+            message: 'Invalid input format. Please enter a valid file hash, URL, domain, or IP address',
+            wasDefanged: processed.wasDefanged,
+            original: processed.original,
+            processed: processed.input
         };
+    }
+    
+    let message = `Detected: ${getTypeLabel(type)}`;
+    if (processed.wasDefanged) {
+        message += ` (defanged input restored)`;
     }
     
     return {
         valid: true,
         type,
-        message: `Detected: ${getTypeLabel(type)}`
+        message,
+        wasDefanged: processed.wasDefanged,
+        original: processed.original,
+        processed: processed.input
     };
 }

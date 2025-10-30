@@ -5,6 +5,7 @@
 import { getApiKey, saveApiKey, clearApiKey, hasApiKey } from './utils/storage.js';
 import { detectInputType, validateInput, getTypeLabel, detectHashType } from './utils/inputDetector.js';
 import { encodeUrlForVT } from './api/urlEncoder.js';
+import { processDefangedInput, getDefangingMessage } from './utils/defanger.js';
 
 // DOM Elements
 const searchInput = document.getElementById('search-input');
@@ -277,10 +278,26 @@ function handleInputChange() {
         return;
     }
     
-    const type = detectInputType(input);
+    // Process defanged input for detection
+    const processed = processDefangedInput(input);
+    const type = detectInputType(processed.input);
+    
     if (type !== 'unknown') {
-        typeIndicator.textContent = `Detected: ${getTypeLabel(type)}`;
+        let message = `Detected: ${getTypeLabel(type)}`;
+        if (processed.wasDefanged) {
+            message += ` (defanged input restored)`;
+        }
+        typeIndicator.textContent = message;
         typeIndicator.classList.remove('hidden');
+        
+        // Show defanged restoration message in toast if defanged
+        if (processed.wasDefanged) {
+            const defangingMessage = getDefangingMessage(processed.original, processed.input);
+            if (defangingMessage) {
+                // Briefly show the defanging message
+                showToast(defangingMessage, 'info', 2000);
+            }
+        }
     } else {
         typeIndicator.classList.add('hidden');
     }
@@ -320,8 +337,19 @@ function handleSearch() {
         return;
     }
     
+    // Use the processed input for navigation
+    const searchInput = validation.processed || input;
+    
+    // Show defanged message if applicable
+    if (validation.wasDefanged) {
+        const defangingMessage = getDefangingMessage(validation.original, validation.processed);
+        if (defangingMessage) {
+            showToast(defangingMessage, 'info', 3000);
+        }
+    }
+    
     // Navigate to results page
-    navigateToResults(validation.type, input);
+    navigateToResults(validation.type, searchInput);
 }
 
 /**
@@ -359,17 +387,28 @@ async function handleOpenInVT() {
         return;
     }
     
+    // Use the processed input for VT
+    const vtInput = validation.processed || input;
+    
+    // Show defanged message if applicable
+    if (validation.wasDefanged) {
+        const defangingMessage = getDefangingMessage(validation.original, validation.processed);
+        if (defangingMessage) {
+            showToast(defangingMessage, 'info', 3000);
+        }
+    }
+    
     // Check if it's MD5 or SHA-1 hash and show warning
     if (validation.type === 'hash') {
-        const hashType = detectHashType(input);
+        const hashType = detectHashType(vtInput);
         if (hashType === 'md5' || hashType === 'sha1') {
-            showHashWarning(hashType, validation.type, input);
+            showHashWarning(hashType, validation.type, vtInput);
             return;
         }
     }
     
     // Open in VirusTotal
-    openInVirusTotal(validation.type, input);
+    openInVirusTotal(validation.type, vtInput);
 }
 
 /**
