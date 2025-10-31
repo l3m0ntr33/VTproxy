@@ -281,13 +281,13 @@
 }
 
 /* Results page header search visibility */
-.results-page .header-search {
-    display: block;
+body.results-page-body .header-search {
+    display: block !important;
 }
 
 @media (max-width: 767px) {
-    .results-page .header-search {
-        display: block;
+    body.results-page-body .header-search {
+        display: block !important;
         width: 100%;
     }
 }

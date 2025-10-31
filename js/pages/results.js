@@ -5,6 +5,8 @@
 import { VTClient } from '../api/client.js';
 import { getApiKey, saveApiKey, clearApiKey } from '../utils/storage.js';
 import { decodeUrlFromVT, encodeUrlForVT } from '../api/urlEncoder.js';
+import { processDefangedInput, getDefangingMessage } from '../utils/defanger.js';
+import { validateInput } from '../utils/inputDetector.js';
 import { 
     formatTimestamp, 
     timeAgo, 
@@ -3402,8 +3404,38 @@ function handleClearApiKey() {
 
 function handleHeaderSearch() {
     const query = headerSearchInput.value.trim();
-    if (query) {
-        window.location.href = `index.html#search=${encodeURIComponent(query)}`;
+    if (!query) return;
+    
+    try {
+        // Process defanged input first
+        const processedResult = processDefangedInput(query);
+        
+        // Show defanged message if applicable
+        const defangingMessage = getDefangingMessage(query, processedResult.input);
+        if (defangingMessage) {
+            showToast(defangingMessage, 'info', 3000);
+        }
+        
+        // Validate and process the input
+        const validation = validateInput(processedResult.input);
+        if (!validation.valid) {
+            showToast(validation.message, 'error');
+            return;
+        }
+        
+        // Store the search data in sessionStorage for the main page to pick up
+        sessionStorage.setItem('vtproxySearchData', JSON.stringify({
+            input: validation.processed,
+            type: validation.type,
+            original: query
+        }));
+        
+        // Redirect to main page
+        window.location.href = 'index.html';
+        
+    } catch (error) {
+        console.error('Search error:', error);
+        showToast('Search failed. Please try again.', 'error');
     }
 }
 

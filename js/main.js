@@ -122,8 +122,8 @@ function checkEnvironment() {
         `;
         searchInput.parentElement.parentElement.appendChild(warning);
         
-        // Update placeholder to hint at Enter behavior
-        searchInput.placeholder = 'Enter hash, URL, domain, or IP (press Enter to open in VirusTotal)';
+        // Keep the original placeholder - user wants consistent message
+        // searchInput.placeholder = 'Enter hash, URL, domain, or IP (press Enter to open in VirusTotal)';
         
         console.warn('🌐 Running on non-localhost domain - API features disabled due to CORS');
     } else if (tauri) {
@@ -142,6 +142,9 @@ function init() {
     
     // Check if API key exists
     checkApiKey();
+    
+    // Check for search data from results page
+    checkForSearchData();
     
     // Event listeners
     searchInput.addEventListener('input', handleInputChange);
@@ -800,6 +803,31 @@ function handleHashWarningContinue() {
         const { type, input } = pendingSearchData;
         closeHashWarningModal();
         openInVirusTotal(type, input);
+    }
+}
+
+/**
+ * Check for search data from results page and process it
+ */
+function checkForSearchData() {
+    try {
+        const searchData = sessionStorage.getItem('vtproxySearchData');
+        if (searchData) {
+            const { input, type, original } = JSON.parse(searchData);
+            
+            // Clear the sessionStorage
+            sessionStorage.removeItem('vtproxySearchData');
+            
+            // Set the search input to the original value
+            searchInput.value = original;
+            
+            // Process the search
+            setTimeout(() => {
+                handleSearch();
+            }, 100);
+        }
+    } catch (error) {
+        console.error('Error processing search data from results page:', error);
     }
 }
 
