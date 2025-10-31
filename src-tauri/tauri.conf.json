@@ -1,14 +1,14 @@
 {
   "build": {
     "beforeDevCommand": "",
-    "beforeBuildCommand": "npm run build-web",
+    "beforeBuildCommand": "npm run sync-config && npm run build-web",
     "devPath": "../",
     "distDir": "../dist",
     "withGlobalTauri": true
   },
   "package": {
     "productName": "vtproxy",
-    "version": "0.0.4"
+    "version": "0.0.5"
   },
   "tauri": {
     "allowlist": {

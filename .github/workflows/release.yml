@@ -51,6 +51,25 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      - name: Sync configuration
+        run: npm run sync-config
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get previous tag
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$PREVIOUS_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges)
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges $PREVIOUS_TAG..HEAD)
+          fi
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "## What's Changed" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0.5
         env:
@@ -59,7 +78,9 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'VTproxy ${{ github.ref_name }}'
           releaseBody: |
-            VTproxy Desktop Application
+            VTproxy Desktop Application ${{ github.ref_name }}
+            
+            ${{ steps.changelog.outputs.changelog }}
             
             ## Downloads
             
