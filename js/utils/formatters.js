@@ -14,6 +14,19 @@ export function formatTimestamp(timestamp) {
 }
 
 /**
+ * Format Unix timestamp to YYYY-MM-DD format with tooltip for full date
+ * @param {number} timestamp - Unix timestamp in seconds
+ * @returns {string} HTML string with short date and tooltip
+ */
+export function formatDateShort(timestamp) {
+    if (!timestamp) return 'N/A';
+    const date = new Date(timestamp * 1000);
+    const shortDate = date.toISOString().split('T')[0]; // YYYY-MM-DD
+    const fullDate = date.toLocaleString(); // Full date for tooltip
+    return `<span title="${fullDate}">${shortDate}</span>`;
+}
+
+/**
  * Get relative time string (e.g., "2 hours ago")
  * @param {number} timestamp - Unix timestamp in seconds
  * @returns {string} Relative time string

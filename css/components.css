@@ -747,6 +747,191 @@ code {
     margin: 0;
 }
 
+/* DNS Records Styling */
+.records-timestamp {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.dns-record-type {
+    margin-bottom: var(--spacing-lg);
+}
+
+.dns-record-type h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    display: inline-block;
+}
+
+.dns-record {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    margin-bottom: var(--spacing-xs);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    font-size: 0.875rem;
+    transition: background-color 0.2s ease;
+}
+
+.dns-record:hover {
+    background: var(--bg-secondary);
+}
+
+.record-type {
+    font-weight: 600;
+    color: var(--accent-color);
+    min-width: 50px;
+    text-align: center;
+    padding: 2px 6px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-xs);
+    font-size: 0.75rem;
+}
+
+.record-value {
+    flex: 1;
+    color: var(--text-primary);
+    word-break: break-all;
+}
+
+.record-value a {
+    color: var(--accent-color);
+    text-decoration: none;
+}
+
+.record-value a:hover {
+    text-decoration: underline;
+}
+
+.record-value .ip-link,
+.record-value .domain-link {
+    color: var(--accent-color);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.record-value .ip-link:hover,
+.record-value .domain-link:hover {
+    text-decoration: underline;
+    background: var(--bg-secondary);
+    padding: 1px 3px;
+    border-radius: 2px;
+}
+
+.record-ttl {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    min-width: 80px;
+    text-align: right;
+}
+
+.whois-timestamp {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Certificate Styling */
+.cert-last-seen-section {
+    margin-bottom: var(--spacing-lg);
+}
+
+.cert-last-seen-section h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.cert-last-seen-section p {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.cert-jarm-section {
+    margin-bottom: var(--spacing-lg);
+}
+
+.cert-jarm-section h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.jarm-fingerprint-code {
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    font-size: 0.875rem;
+    background: var(--bg-tertiary);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    display: inline-block;
+    color: var(--text-primary);
+    word-break: break-all;
+    line-height: 1.4;
+}
+
+.cert-parsed-section {
+    margin-bottom: var(--spacing-lg);
+}
+
+.cert-parsed-section h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.cert-raw-section {
+    margin-top: var(--spacing-lg);
+}
+
+.cert-raw-section h4 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.cert-raw-data {
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    font-size: 0.75rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-md);
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin: 0;
+    line-height: 1.4;
+}
+
 .historical-whois-records {
     display: flex;
     flex-direction: column;
@@ -1140,6 +1325,21 @@ code {
     font-size: 1rem;
     font-weight: 600;
     margin: 0;
+    color: var(--text-primary);
+    transition: color 0.2s ease;
+}
+
+.section-title-grey {
+    color: var(--text-muted) !important;
+    opacity: 0.7;
+}
+
+.section-header:hover h3 {
+    color: var(--accent-color);
+}
+
+.section-header:hover .section-title-grey {
+    color: var(--text-secondary) !important;
 }
 
 .chevron {

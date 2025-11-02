@@ -9,6 +9,7 @@ import { processDefangedInput, getDefangingMessage } from '../utils/defanger.js'
 import { validateInput } from '../utils/inputDetector.js';
 import { 
     formatTimestamp, 
+    formatDateShort,
     timeAgo, 
     formatFileSize, 
     getDetectionSeverity,
@@ -69,14 +70,20 @@ function getCountryFlag(countryCode) {
     if (!countryCode || countryCode.length !== 2) return '';
     
     // Convert country code to flag emoji
-    // Unicode flags are based on Regional Indicator Symbols
-    // A = U+1F1E6, B = U+1F1E7, etc.
-    const codePoints = countryCode
-        .toUpperCase()
-        .split('')
-        .map(char => 127397 + char.charCodeAt(0));
-    
+    const codePoints = [...countryCode].map(char => char.charCodeAt(0) + 127397);
     return String.fromCodePoint(...codePoints);
+}
+
+/**
+ * Truncate string to specified length
+ * @param {string} str - String to truncate
+ * @param {number} length - Maximum length
+ * @returns {string} Truncated string
+ */
+function truncateString(str, length) {
+    if (!str || typeof str !== 'string') return str || '';
+    if (str.length <= length) return str;
+    return str.substring(0, length) + '...';
 }
 
 // ==================== Initialization ====================
@@ -303,7 +310,30 @@ function renderEntityInfo() {
             break;
         case 'domain':
             title = currentId;
-            subtitle = 'Domain';
+            
+            // Extract registrar info - try simple field first, then RDAP structure
+            let registrar = 'Domain';
+            try {
+                // First try the simple registrar field if it exists
+                if (attrs.registrar) {
+                    registrar = `Registrar: ${attrs.registrar}`;
+                } else if (attrs.rdap && attrs.rdap.entities && Array.isArray(attrs.rdap.entities)) {
+                    // Fall back to RDAP structure
+                    const registrarEntity = attrs.rdap.entities.find(entity => 
+                        entity.roles && Array.isArray(entity.roles) && entity.roles.includes('registrar')
+                    );
+                    if (registrarEntity && registrarEntity.vcard_array && Array.isArray(registrarEntity.vcard_array)) {
+                        const fnEntry = registrarEntity.vcard_array.find(item => item.name === 'fn');
+                        if (fnEntry && fnEntry.values && Array.isArray(fnEntry.values) && fnEntry.values[0]) {
+                            registrar = `Registrar: ${fnEntry.values[0]}`;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.warn('Error extracting registrar info:', error);
+                registrar = 'Domain';
+            }
+            subtitle = registrar;
             break;
         case 'ip':
             // Title: IP_ADDRESS (NETWORK_CIDR)
@@ -464,6 +494,22 @@ function renderEntityMeta() {
             }
         } catch (error) {
             console.error('Error rendering IP metadata badges:', error);
+        }
+    }
+    
+    // Domain-specific metadata
+    if (currentType === 'domain') {
+        try {
+            // Creation date with relative time
+            if (attrs.creation_date && typeof attrs.creation_date === 'number') {
+                const fullDate = formatTimestamp(attrs.creation_date);
+                const relativeDate = timeAgo(attrs.creation_date);
+                if (fullDate && relativeDate) {
+                    badges.push(`<span class="meta-badge" title="${escapeHtml(fullDate)}">Created: ${relativeDate}</span>`);
+                }
+            }
+        } catch (error) {
+            console.warn('Error rendering domain creation date:', error);
         }
     }
     
@@ -1002,51 +1048,380 @@ function renderUrlDetails(attrs) {
 }
 
 /**
- * Render domain details
+ * Render domain details with collapsible sections
  */
 function renderDomainDetails(attrs) {
-    const basicProps = [
-        createPropertyRow('Domain', currentId),
-        createPropertyRow('Registrar', attrs.registrar),
-        createPropertyRow('Creation date', formatTimestamp(attrs.creation_date)),
-        createPropertyRow('Last update', formatTimestamp(attrs.last_update_date)),
-        createPropertyRow('Categories', Object.keys(attrs.categories || {}).join(', ')),
-        createPropertyRow('Popularity rank', attrs.popularity_ranks?.Alexa?.rank || 'N/A'),
-    ].join('');
+    let sectionsHtml = '';
     
-    const whoisProps = attrs.whois ? [
-        createPropertyRow('Registrant', attrs.whois_registrant),
-        createPropertyRow('Admin', attrs.whois_admin),
-    ].join('') : createEmptyState('WHOIS data not available');
+    // Section 1: Last DNS Records (expanded by default)
+    sectionsHtml += renderDomainDNSRecords(attrs);
     
-    const timestamps = [
-        createPropertyRow('Last analysis', formatTimestamp(attrs.last_analysis_date)),
-        createPropertyRow('Last DNS records', formatTimestamp(attrs.last_dns_records_date)),
-        createPropertyRow('Last update', formatTimestamp(attrs.last_update_date)),
-    ].join('');
+    // Section 2: Last HTTPS certificate data (collapsed)
+    sectionsHtml += renderDomainHTTPSCertificate(attrs);
     
-    return `
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">Basic Properties</h3>
+    // Section 3: Registration Data (RDAP) (collapsed)
+    sectionsHtml += renderDomainRDAP(attrs);
+    
+    // Section 4: Whois Lookup (collapsed)
+    sectionsHtml += renderDomainWhois(attrs);
+    
+    return sectionsHtml;
+}
+
+/**
+ * Check if a string is a valid domain name
+ * @param {string} domain - Domain string to validate
+ * @returns {boolean} True if valid domain
+ */
+function isValidDomain(domain) {
+    if (!domain || typeof domain !== 'string') return false;
+    
+    // Remove trailing dot and clean up
+    domain = domain.replace(/\.$/, '').trim();
+    
+    // Basic domain validation regex
+    const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+    
+    // Check minimum length and pattern
+    if (domain.length < 4 || domain.length > 253) return false;
+    if (!domainRegex.test(domain)) return false;
+    
+    // Ensure it has at least one dot and doesn't start/end with hyphen
+    if (!domain.includes('.')) return false;
+    if (domain.startsWith('-') || domain.endsWith('-')) return false;
+    
+    return true;
+}
+
+/**
+ * Render domain DNS Records section
+ */
+function renderDomainDNSRecords(attrs) {
+    if (!attrs.last_dns_records || attrs.last_dns_records.length === 0) {
+        return createExpandableSection(
+            'Last DNS Records',
+            '<p class="text-muted">No DNS records available</p>',
+            false,
+            true // Grey out title
+        );
+    }
+    
+    const dnsRecords = attrs.last_dns_records;
+    let recordsHtml = '';
+    
+    // Group records by type
+    const recordsByType = {};
+    dnsRecords.forEach(record => {
+        if (!recordsByType[record.type]) {
+            recordsByType[record.type] = [];
+        }
+        recordsByType[record.type].push(record);
+    });
+    
+    // Display records grouped by type
+    Object.keys(recordsByType).sort().forEach(type => {
+        recordsHtml += `<div class="dns-record-type"><h4>${escapeHtml(type)} Records</h4>`;
+        recordsByType[type].forEach(record => {
+            let valueDisplay = escapeHtml(record.value);
+            
+            // Special formatting for different record types
+            if (type === 'A' || type === 'AAAA') {
+                valueDisplay = `<a href="result.html?type=ip&id=${encodeURIComponent(record.value)}" class="ip-link">${valueDisplay}</a>`;
+            } else if (type === 'NS' || type === 'CNAME' || type === 'MX' || type === 'PTR' || type === 'TXT') {
+                // Make domain names clickable for these record types
+                // Extract domain from the value (handle cases like "priority domain.com" for MX)
+                let domainValue = record.value;
+                if (type === 'MX' && record.value.includes(' ')) {
+                    // For MX records, extract the domain part (after priority)
+                    domainValue = record.value.split(' ').slice(1).join(' ');
+                } else if (type === 'TXT' && record.value.includes('"')) {
+                    // For TXT records, don't make clickable if they contain complex data
+                    domainValue = null;
+                }
+                
+                if (domainValue && isValidDomain(domainValue)) {
+                    valueDisplay = `<a href="result.html?type=domain&id=${encodeURIComponent(domainValue)}" class="domain-link">${escapeHtml(record.value)}</a>`;
+                }
+            } else if (type === 'SOA') {
+                valueDisplay = `${escapeHtml(record.value)} (Serial: ${record.serial})`;
+            }
+            
+            recordsHtml += `
+                <div class="dns-record">
+                    <span class="record-type">${escapeHtml(type)}</span>
+                    <span class="record-value">${valueDisplay}</span>
+                    <span class="record-ttl">TTL: ${record.ttl}s</span>
+                </div>
+            `;
+        });
+        recordsHtml += `</div>`;
+    });
+    
+    // Add timestamp
+    if (attrs.last_dns_records_date) {
+        recordsHtml = `<div class="records-timestamp">Last updated: ${formatTimestamp(attrs.last_dns_records_date)}</div>${recordsHtml}`;
+    }
+    
+    return createExpandableSection('Last DNS Records', recordsHtml, false);
+}
+
+/**
+ * Render domain HTTPS Certificate section
+ */
+function renderDomainHTTPSCertificate(attrs) {
+    if (!attrs.last_https_certificate) {
+        return createExpandableSection(
+            'Last HTTPS Certificate Data',
+            '<p class="text-muted">No HTTPS certificate data available</p>',
+            false,
+            true // Grey out title
+        );
+    }
+    
+    const cert = attrs.last_https_certificate;
+    let certContent = '';
+    
+    // Add "Last Seen" as a separate section if available
+    if (attrs.last_https_certificate_date) {
+        certContent += `
+            <div class="cert-last-seen-section">
+                <h4>Last Seen</h4>
+                <p>${formatTimestamp(attrs.last_https_certificate_date)}</p>
             </div>
-            <div class="card-body">${basicProps}</div>
-        </div>
+        `;
+    }
+    
+    // Jarm fingerprint - check multiple possible locations
+    let jarmFingerprint = null;
+    
+    // Check in certificate object
+    if (cert.jarm_fingerprint) {
+        jarmFingerprint = cert.jarm_fingerprint;
+    }
+    // Check in main attributes (some API responses have it here)
+    else if (attrs.jarm_fingerprint) {
+        jarmFingerprint = attrs.jarm_fingerprint;
+    }
+    // Check in other possible nested locations
+    else if (cert.jarm) {
+        jarmFingerprint = cert.jarm;
+    } else if (attrs.jarm) {
+        jarmFingerprint = attrs.jarm;
+    }
+    
+    // Add JARM fingerprint section if found
+    if (jarmFingerprint) {
+        certContent += `
+            <div class="cert-jarm-section">
+                <h4>JARM Fingerprint</h4>
+                <code class="jarm-fingerprint-code">${escapeHtml(jarmFingerprint)}</code>
+            </div>
+        `;
+    }
+    
+    // Optional: Add some basic parsed fields if they exist and are valid
+    let parsedFields = '';
+    if (cert.version && typeof cert.version === 'string') {
+        parsedFields += createPropertyRow('Version', cert.version);
+    }
+    if (cert.serial_number && typeof cert.serial_number === 'string') {
+        parsedFields += createPropertyRow('Serial Number', cert.serial_number, true);
+    }
+    if (cert.signature_algorithm && typeof cert.signature_algorithm === 'string') {
+        parsedFields += createPropertyRow('Signature Algorithm', cert.signature_algorithm);
+    }
+    
+    // Handle issuer and subject objects properly
+    if (cert.issuer && typeof cert.issuer === 'object') {
+        const issuerStr = Object.entries(cert.issuer)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(', ');
+        parsedFields += createPropertyRow('Issuer', issuerStr);
+    } else if (cert.issuer && typeof cert.issuer === 'string') {
+        parsedFields += createPropertyRow('Issuer', cert.issuer);
+    }
+    
+    if (cert.subject && typeof cert.subject === 'object') {
+        const subjectStr = Object.entries(cert.subject)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(', ');
+        parsedFields += createPropertyRow('Subject', subjectStr);
+    } else if (cert.subject && typeof cert.subject === 'string') {
+        parsedFields += createPropertyRow('Subject', cert.subject);
+    }
+    
+    // Handle validity dates properly
+    if (cert.validity && typeof cert.validity === 'object') {
+        if (cert.validity.not_before) {
+            const notBefore = typeof cert.validity.not_before === 'string' 
+                ? cert.validity.not_before 
+                : formatTimestamp(cert.validity.not_before);
+            parsedFields += createPropertyRow('Valid From', notBefore);
+        }
+        if (cert.validity.not_after) {
+            const notAfter = typeof cert.validity.not_after === 'string' 
+                ? cert.validity.not_after 
+                : formatTimestamp(cert.validity.not_after);
+            parsedFields += createPropertyRow('Valid Until', notAfter);
+        }
+    }
+    
+    // Add parsed fields if we have any
+    if (parsedFields) {
+        certContent += `
+            <div class="cert-parsed-section">
+                <h4>Parsed Certificate Fields</h4>
+                ${parsedFields}
+            </div>
+        `;
+    }
+    
+    // Raw certificate data display (like VirusTotal)
+    if (cert.raw) {
+        certContent += `
+            <div class="cert-raw-section">
+                <h4>Raw Certificate Data</h4>
+                <pre class="cert-raw-data">${escapeHtml(cert.raw)}</pre>
+            </div>
+        `;
+    } else if (cert.pem) {
+        certContent += `
+            <div class="cert-raw-section">
+                <h4>Raw Certificate Data</h4>
+                <pre class="cert-raw-data">${escapeHtml(cert.pem)}</pre>
+            </div>
+        `;
+    } else {
+        // Fallback: Display structured certificate data as JSON
+        const certJson = JSON.stringify(cert, null, 2);
+        certContent += `
+            <div class="cert-raw-section">
+                <h4>Certificate Data</h4>
+                <pre class="cert-raw-data">${escapeHtml(certJson)}</pre>
+            </div>
+        `;
+    }
+    
+    return createExpandableSection('Last HTTPS Certificate Data', certContent, false);
+}
+
+/**
+ * Render domain RDAP section
+ */
+function renderDomainRDAP(attrs) {
+    if (!attrs.rdap) {
+        return createExpandableSection(
+            'Registration Data (RDAP)',
+            '<p class="text-muted">RDAP data not available</p>',
+            false,
+            true // Grey out title
+        );
+    }
+    
+    const rdap = attrs.rdap;
+    const props = [];
+    
+    // Basic RDAP fields
+    if (rdap.handle) props.push(createPropertyRow('Handle', rdap.handle));
+    if (rdap.ldh_name) props.push(createPropertyRow('LDH Name', rdap.ldh_name));
+    if (rdap.status && rdap.status.length > 0) {
+        props.push(createPropertyRow('Status', rdap.status.join(', ')));
+    }
+    
+    // Events (registration, expiration, etc.)
+    if (rdap.events && rdap.events.length > 0) {
+        rdap.events.forEach(event => {
+            const action = event.event_action || 'unknown';
+            const date = event.event_date ? formatTimestamp(new Date(event.event_date).getTime() / 1000) : 'N/A';
+            props.push(createPropertyRow(
+                action.charAt(0).toUpperCase() + action.slice(1),
+                date
+            ));
+        });
+    }
+    
+    // Nameservers
+    if (rdap.nameservers && rdap.nameservers.length > 0) {
+        const nameserverList = rdap.nameservers.map(ns => 
+            ns.ldh_name || ns.unicode_name || 'Unknown'
+        ).join(', ');
+        props.push(createPropertyRow('Nameservers', nameserverList));
+    }
+    
+    // Entities (registrar, etc.)
+    if (rdap.entities && rdap.entities.length > 0) {
+        rdap.entities.forEach(entity => {
+            if (entity.roles && entity.roles.length > 0) {
+                const roles = entity.roles.join(', ');
+                const name = entity.vcard_array ? 
+                    entity.vcard_array.find(item => item.name === 'fn')?.values?.[0] || 'Unknown' : 
+                    'Unknown';
+                props.push(createPropertyRow(roles, name));
+            }
+        });
+    }
+    
+    // Check if we actually have any meaningful data
+    const hasData = props.length > 0;
+    
+    const rdapContent = hasData ? props.join('') : '<p class="text-muted">RDAP data is incomplete or empty</p>';
+    
+    return createExpandableSection('Registration Data (RDAP)', rdapContent, false, !hasData);
+}
+
+/**
+ * Render domain Whois section
+ */
+function renderDomainWhois(attrs) {
+    if (!attrs.whois) {
+        return createExpandableSection(
+            'Whois Lookup',
+            '<p class="text-muted">WHOIS data not available</p>',
+            false,
+            true // Grey out title
+        );
+    }
+    
+    let whoisContent = '';
+    
+    if (typeof attrs.whois === 'string') {
+        // Raw whois text
+        whoisContent = `<pre class="whois-text">${escapeHtml(attrs.whois)}</pre>`;
+    } else if (typeof attrs.whois === 'object') {
+        // Structured whois data
+        const whoisProps = [];
         
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">WHOIS Information</h3>
-            </div>
-            <div class="card-body">${whoisProps}</div>
-        </div>
+        // Common whois fields
+        if (attrs.whois.registrar) whoisProps.push(createPropertyRow('Registrar', attrs.whois.registrar));
+        if (attrs.whois.registrant) whoisProps.push(createPropertyRow('Registrant', attrs.whois.registrant));
+        if (attrs.whois.admin) whoisProps.push(createPropertyRow('Admin', attrs.whois.admin));
+        if (attrs.whois.tech) whoisProps.push(createPropertyRow('Tech', attrs.whois.tech));
+        if (attrs.whois.billing) whoisProps.push(createPropertyRow('Billing', attrs.whois.billing));
         
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">History</h3>
-            </div>
-            <div class="card-body">${timestamps}</div>
-        </div>
-    `;
+        // Dates
+        if (attrs.whois.created) whoisProps.push(createPropertyRow('Created', attrs.whois.created));
+        if (attrs.whois.updated) whoisProps.push(createPropertyRow('Updated', attrs.whois.updated));
+        if (attrs.whois.expires) whoisProps.push(createPropertyRow('Expires', attrs.whois.expires));
+        
+        // Nameservers
+        if (attrs.whois.name_servers && attrs.whois.name_servers.length > 0) {
+            whoisProps.push(createPropertyRow('Name Servers', attrs.whois.name_servers.join(', ')));
+        }
+        
+        // DNSSEC
+        if (attrs.whois.dnssec) whoisProps.push(createPropertyRow('DNSSEC', attrs.whois.dnssec));
+        
+        whoisContent = whoisProps.length > 0 ? whoisProps.join('') : '<p class="text-muted">WHOIS data is incomplete</p>';
+    } else {
+        whoisContent = '<p class="text-muted">WHOIS data format not recognized</p>';
+    }
+    
+    // Add whois date if available
+    if (attrs.whois_date) {
+        whoisContent = `<div class="whois-timestamp">WHOIS retrieved: ${formatTimestamp(attrs.whois_date)}</div>${whoisContent}`;
+    }
+    
+    return createExpandableSection('Whois Lookup', whoisContent, false);
 }
 
 /**
@@ -1258,10 +1633,12 @@ function renderBehaviorTab() {
 function renderRelationsTab() {
     if (currentType === 'url') {
         return renderUrlRelations();
+    } else if (currentType === 'domain') {
+        return renderDomainRelations();
     } else if (currentType === 'ip') {
         return renderIpRelations();
     } else {
-        return createEmptyState('Relations view is only available for URLs and IP addresses');
+        return createEmptyState('Relations view is only available for URLs, domains, and IP addresses');
     }
 }
 
@@ -1436,6 +1813,61 @@ function renderIpRelations() {
 }
 
 /**
+ * Render Domain relations
+ */
+function renderDomainRelations() {
+    let sectionsHtml = '';
+    
+    // Add "Load All Relations" button at the top
+    sectionsHtml += `
+        <div class="load-all-relations-container">
+            <button class="btn-secondary" onclick="loadAllDomainRelations()">
+                Load All Relations
+            </button>
+            <span class="text-muted">Load all relationship data at once</span>
+        </div>
+    `;
+    
+    // 1. Downloaded Files (lazy load)
+    sectionsHtml += renderDomainLazyLoadSection('downloaded_files', 'Downloaded Files', 'Load files downloaded from this domain', 'Files downloaded from this domain according to VirusTotal datasets.');
+    
+    // 2. URLs (lazy load)
+    sectionsHtml += renderDomainLazyLoadSection('urls', 'URLs', 'Load URLs related to this domain', 'Latest URLs scanned that contain this domain.');
+    
+    // 3. Subdomains (lazy load)
+    sectionsHtml += renderDomainLazyLoadSection('subdomains', 'Subdomains', 'Load subdomains of this domain', 'Discovered subdomains of the given domain.');
+    
+    // 4. SOA Records (lazy load)
+    sectionsHtml += renderDomainLazyLoadSection('soa_records', 'SOA Records', 'Load SOA records for this domain', 'Start of Authority records for this domain.');
+    
+    // 5. DNS Resolutions (lazy load)
+    sectionsHtml += renderDomainLazyLoadSection('resolutions', 'DNS Resolutions', 'Load IP resolutions for this domain', 'IP addresses that this domain resolves to.');
+    
+    // 6. Referrer Files (lazy load)
+    sectionsHtml += renderDomainLazyLoadSection('referrer_files', 'Referrer Files', 'Load files that reference this domain', 'Latest files where this domain is found in their contents.');
+    
+    // 8. NS Records (lazy load)
+    sectionsHtml += renderDomainLazyLoadSection('ns_records', 'NS Records', 'Load nameserver records for this domain', 'Nameserver records for this domain.');
+    
+    // 9. MX Records (lazy load)
+    sectionsHtml += renderDomainLazyLoadSection('mx_records', 'MX Records', 'Load mail exchange records for this domain', 'Mail exchange records for this domain.');
+    
+    // 10. Historical WHOIS (lazy load)
+    sectionsHtml += renderDomainLazyLoadSection('historical_whois', 'Historical WHOIS', 'Load historical WHOIS records', 'Historical WHOIS information for this domain.');
+    
+    // 10. Historical SSL Certificates (lazy load)
+    sectionsHtml += renderDomainLazyLoadSection('historical_ssl_certificates', 'Historical SSL Certificates', 'Load SSL certificates for this domain', 'Historical SSL certificates observed for this domain.');
+    
+    // 11. Communicating Files (lazy load)
+    sectionsHtml += renderDomainLazyLoadSection('communicating_files', 'Communicating Files', 'Load files that communicate with this domain', 'Files that communicate with this domain.');
+    
+    // 12. Collections (lazy load)
+    sectionsHtml += renderDomainLazyLoadSection('collections', 'Collections', 'Load threat intelligence collections', 'Threat intelligence collections containing this domain.');
+    
+    return sectionsHtml;
+}
+
+/**
  * Render Outgoing Links section
  */
 function renderOutgoingLinks(attrs) {
@@ -1460,17 +1892,9 @@ function renderOutgoingLinks(attrs) {
         content = `<div class="outgoing-links-list">${linksList}</div>`;
     }
     
-    return `
-        <div class="expandable-section">
-            <div class="section-header" onclick="toggleSection(this)">
-                <h3>Outgoing Links (${outgoingLinks.length})</h3>
-                <span class="chevron">▼</span>
-            </div>
-            <div class="section-content">
-                ${content}
-            </div>
-        </div>
-    `;
+    // Use createExpandableSection to support grey title functionality
+    const hasResults = outgoingLinks.length > 0;
+    return createExpandableSection('Outgoing Links', content, false, !hasResults);
 }
 
 /**
@@ -1969,6 +2393,10 @@ function renderCommunityTab() {
         return renderIpCommunityTab();
     }
     
+    if (currentType === 'domain') {
+        return renderDomainCommunityTab();
+    }
+    
     // Default community tab for other types
     // Load votes immediately, but comments on demand
     setTimeout(() => loadVotesSummary(), 100);
@@ -1995,6 +2423,59 @@ function renderCommunityTab() {
             </div>
         </div>
     `;
+}
+
+/**
+ * Render domain community tab
+ */
+function renderDomainCommunityTab() {
+    let sectionsHtml = '';
+    
+    // 1. Voting details (lazy load)
+    sectionsHtml += `
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3 id="voting-details-title">Voting details</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div class="section-content">
+                <div id="voting-details-content">
+                    <button class="btn-secondary" onclick="loadDomainVotingDetails()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
+                            <path d="M21 3v5h-5"></path>
+                        </svg>
+                        Load Voting Details
+                    </button>
+                    <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.875rem;">Click to load individual community votes</p>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 2. Comments (lazy load)
+    sectionsHtml += `
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3 id="comments-title">Comments</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div class="section-content">
+                <div id="comments-content">
+                    <button class="btn-secondary" onclick="loadDomainComments()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
+                            <path d="M21 3v5h-5"></path>
+                        </svg>
+                        Load Comments
+                    </button>
+                    <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.875rem;">Click to load community comments</p>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    return sectionsHtml;
 }
 
 /**
@@ -2104,7 +2585,17 @@ window.loadUrlsRelatedTracker = async function() {
         // Render results
         if (relatedUrls.length === 0) {
             contentDiv.innerHTML = createEmptyState('No related URLs found');
+            // Grey out title when no results
+            if (titleElement) {
+                titleElement.textContent = 'URLs related by tracker ID (0)';
+                titleElement.classList.add('section-title-grey');
+            }
             return;
+        }
+        
+        // Remove grey class if results exist
+        if (titleElement) {
+            titleElement.classList.remove('section-title-grey');
         }
         
         contentDiv.innerHTML = renderRelatedUrlsTable(relatedUrls);
@@ -2159,8 +2650,18 @@ window.loadEmbeddedJsFiles = async function() {
         
         // Render results
         if (jsFiles.length === 0) {
-            contentDiv.innerHTML = createEmptyState('No embedded JavaScript files found');
+            contentDiv.innerHTML = createEmptyState('No embedded JS files found');
+            // Grey out title when no results
+            if (titleElement) {
+                titleElement.textContent = 'Embedded JS Files (0)';
+                titleElement.classList.add('section-title-grey');
+            }
             return;
+        }
+        
+        // Remove grey class if results exist
+        if (titleElement) {
+            titleElement.classList.remove('section-title-grey');
         }
         
         contentDiv.innerHTML = renderEmbeddedJsFilesTable(jsFiles);
@@ -2216,7 +2717,17 @@ window.loadDownloadedFiles = async function() {
         // Render results
         if (files.length === 0) {
             contentDiv.innerHTML = createEmptyState('No downloaded files found');
+            // Grey out title when no results
+            if (titleElement) {
+                titleElement.textContent = 'Downloaded Files (0)';
+                titleElement.classList.add('section-title-grey');
+            }
             return;
+        }
+        
+        // Remove grey class if results exist
+        if (titleElement) {
+            titleElement.classList.remove('section-title-grey');
         }
         
         contentDiv.innerHTML = renderFilesTable(files, true); // true = show download context
@@ -2272,7 +2783,17 @@ window.loadCommunicatingFiles = async function() {
         // Render results
         if (files.length === 0) {
             contentDiv.innerHTML = createEmptyState('No communicating files found');
+            // Grey out title when no results
+            if (titleElement) {
+                titleElement.textContent = 'Communicating Files (0)';
+                titleElement.classList.add('section-title-grey');
+            }
             return;
+        }
+        
+        // Remove grey class if results exist
+        if (titleElement) {
+            titleElement.classList.remove('section-title-grey');
         }
         
         contentDiv.innerHTML = renderFilesTable(files, false); // false = no download context
@@ -2328,7 +2849,17 @@ window.loadContactedDomains = async function() {
         // Render results
         if (domains.length === 0) {
             contentDiv.innerHTML = createEmptyState('No contacted domains found');
+            // Grey out title when no results
+            if (titleElement) {
+                titleElement.textContent = 'Contacted Domains (0)';
+                titleElement.classList.add('section-title-grey');
+            }
             return;
+        }
+        
+        // Remove grey class if results exist
+        if (titleElement) {
+            titleElement.classList.remove('section-title-grey');
         }
         
         contentDiv.innerHTML = renderContactedDomainsTable(domains, totalCount);
@@ -2384,7 +2915,17 @@ window.loadContactedIps = async function() {
         // Render results
         if (ips.length === 0) {
             contentDiv.innerHTML = createEmptyState('No contacted IPs found');
+            // Grey out title when no results
+            if (titleElement) {
+                titleElement.textContent = 'Contacted IPs (0)';
+                titleElement.classList.add('section-title-grey');
+            }
             return;
+        }
+        
+        // Remove grey class if results exist
+        if (titleElement) {
+            titleElement.classList.remove('section-title-grey');
         }
         
         contentDiv.innerHTML = renderContactedIpsTable(ips, totalCount);
@@ -3023,6 +3564,137 @@ window.loadIpVotingDetails = async function() {
 };
 
 /**
+ * Load domain voting details
+ */
+window.loadDomainVotingDetails = async function() {
+    const container = document.getElementById('voting-details-content');
+    const titleEl = document.getElementById('voting-details-title');
+    
+    if (!container) return;
+    
+    // Show loading
+    container.innerHTML = '<div class="loading-inline">Loading...</div>';
+    
+    try {
+        const votesData = currentData.attributes.total_votes || {};
+        const harmless = votesData.harmless || 0;
+        const malicious = votesData.malicious || 0;
+        const total = harmless + malicious;
+        
+        // Update title with count
+        if (titleEl) {
+            titleEl.textContent = `Voting details (${total})`;
+        }
+        
+        if (total === 0) {
+            container.innerHTML = '<p class="text-muted">No votes yet</p>';
+            return;
+        }
+        
+        // Render voting summary
+        let html = `
+            <div class="voting-details-summary">
+                <div class="vote-breakdown">
+                    <div class="vote-item vote-harmless">
+                        <span class="vote-icon">👍</span>
+                        <span class="vote-label">Harmless</span>
+                        <span class="vote-count">${harmless}</span>
+                    </div>
+                    <div class="vote-item vote-malicious">
+                        <span class="vote-icon">👎</span>
+                        <span class="vote-label">Malicious</span>
+                        <span class="vote-count">${malicious}</span>
+                    </div>
+                </div>
+                <p class="text-muted mt-3">Individual vote details are not available via the API. This shows the aggregate voting statistics.</p>
+            </div>
+        `;
+        
+        container.innerHTML = html;
+        
+    } catch (error) {
+        console.error('Error loading voting details:', error);
+        container.innerHTML = `<p class="text-error">Error loading voting details: ${escapeHtml(error.message)}</p>`;
+    }
+};
+
+/**
+ * Load domain comments
+ */
+window.loadDomainComments = async function() {
+    const container = document.getElementById('comments-content');
+    const titleEl = document.getElementById('comments-title');
+    
+    if (!container) return;
+    
+    // Show loading
+    container.innerHTML = '<div class="loading-inline">Loading comments...</div>';
+    
+    try {
+        const comments = await vtClient.getDomainComments(currentId, 40);
+        
+        // Update title with count
+        if (titleEl) {
+            titleEl.textContent = `Comments (${comments.data.length})`;
+        }
+        
+        if (comments.data.length === 0) {
+            container.innerHTML = '<p class="text-muted">No comments yet</p>';
+            return;
+        }
+        
+        // Render comments WITHOUT card wrapper (already in expandable section)
+        const commentsHtml = comments.data.map(comment => {
+            const attrs = comment.attributes;
+            
+            // Simple text rendering - preserve formatting as plain text like VT does
+            let text = attrs.text || '';
+            if (text) {
+                // Just escape HTML and convert line breaks - keep it simple
+                text = escapeHtml(text);
+                
+                // Make URLs clickable BEFORE converting line breaks
+                text = text.replace(/(https?:\/\/[^\s\n]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+                
+                // Convert line breaks to <br> for display (do this AFTER URL conversion)
+                text = text.replace(/\n/g, '<br>');
+            }
+            
+            // Format tags if present
+            const tagsHtml = attrs.tags && attrs.tags.length > 0 ? `
+                <div class="comment-tags">
+                    ${attrs.tags.map(tag => `<span class="comment-tag">${escapeHtml(tag)}</span>`).join('')}
+                </div>
+            ` : '';
+            
+            return `
+                <div class="comment">
+                    <div class="comment-header">
+                        <span class="comment-author">${escapeHtml(attrs.author || 'Anonymous')}</span>
+                        <span class="comment-date">${timeAgo(attrs.date)}</span>
+                    </div>
+                    <div class="comment-body">${text}</div>
+                    ${tagsHtml}
+                    ${attrs.votes ? `
+                        <div class="comment-votes">
+                            <span class="positive">👍 ${attrs.votes.positive || 0}</span>
+                            <span class="negative">👎 ${attrs.votes.negative || 0}</span>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }).join('');
+        
+        // Render directly without card wrapper (section already has title)
+        container.innerHTML = commentsHtml;
+        
+    } catch (error) {
+        console.error('Error loading comments:', error);
+        container.innerHTML = `<p class="text-error">Error loading comments: ${escapeHtml(error.message)}</p>`;
+    }
+};
+
+/**
  * Load comments section on demand
  */
 window.loadCommentsSection = async function() {
@@ -3536,10 +4208,13 @@ window.loadIpRelation = async function(relationship, title, sectionId) {
         
         // Render based on relationship type
         let html = '';
+        let hasResults = false;
         
         if (!data || !data.data || data.data.length === 0) {
             html = '<p class="text-muted">No data found</p>';
+            hasResults = false;
         } else {
+            hasResults = true;
             switch (relationship) {
                 case 'urls':
                     html = renderIpUrls(data);
@@ -3568,12 +4243,158 @@ window.loadIpRelation = async function(relationship, title, sectionId) {
             }
         }
         
+        // Grey out title if no results
+        if (titleEl && !hasResults) {
+            const tooltip = titleEl.querySelector('.info-tooltip');
+            const tooltipHtml = tooltip ? tooltip.outerHTML : '';
+            titleEl.innerHTML = `${title} (0) ${tooltipHtml}`;
+            titleEl.classList.add('section-title-grey');
+        } else if (titleEl && hasResults) {
+            // Remove grey class if results exist
+            titleEl.classList.remove('section-title-grey');
+        }
+        
         container.innerHTML = html;
         
     } catch (error) {
         console.error(`Error loading ${relationship}:`, error);
         container.innerHTML = `<p class="text-error">Error loading data: ${escapeHtml(error.message)}</p>`;
     }
+};
+
+/**
+ * Load domain relationship data (generic handler)
+ */
+window.loadDomainRelation = async function(relationship, title, sectionId) {
+    const container = document.getElementById(`${sectionId}-content`);
+    const titleEl = document.getElementById(`${sectionId}-title`);
+    
+    if (!container) return;
+    
+    // Show loading
+    container.innerHTML = '<div class="loading-inline">Loading...</div>';
+    
+    try {
+        // Load appropriate limits for different relationship types
+        const limit = (relationship === 'downloaded_files' || relationship === 'communicating_files' || relationship === 'referrer_files' || relationship === 'urls' || relationship === 'subdomains') ? 20 : 40;
+        const data = await vtClient.getDomainRelationship(currentId, relationship, limit);
+        
+        // Update title with count - show loaded/total for file and URL relationships
+        if (titleEl && data.meta && data.meta.count !== undefined) {
+            const tooltip = titleEl.querySelector('.info-tooltip');
+            const tooltipHtml = tooltip ? tooltip.outerHTML : '';
+            
+            if ((relationship === 'downloaded_files' || relationship === 'communicating_files' || relationship === 'referrer_files' || relationship === 'urls' || relationship === 'subdomains') && data.data) {
+                const loaded = data.data.length;
+                const total = data.meta.count;
+                titleEl.innerHTML = `${title} (${loaded}/${total}) ${tooltipHtml}`;
+            } else {
+                titleEl.innerHTML = `${title} (${data.meta.count}) ${tooltipHtml}`;
+            }
+        }
+        
+        // Render based on relationship type
+        let html = '';
+        let hasResults = false;
+        
+        if (!data || !data.data || data.data.length === 0) {
+            html = '<p class="text-muted">No data found</p>';
+            hasResults = false;
+        } else {
+            hasResults = true;
+            switch (relationship) {
+                case 'downloaded_files':
+                case 'communicating_files':
+                case 'referrer_files':
+                    html = renderDomainFiles(data);
+                    break;
+                case 'urls':
+                    html = renderDomainUrls(data);
+                    break;
+                case 'subdomains':
+                    html = renderDomainSubdomains(data);
+                    break;
+                case 'soa_records':
+                    html = renderDomainSoaRecords(data);
+                    break;
+                case 'resolutions':
+                    html = renderDomainResolutions(data);
+                    break;
+                case 'referrer_files':
+                    html = renderDomainReferrerFiles(data);
+                    break;
+                case 'ns_records':
+                    html = renderDomainNsRecords(data);
+                    break;
+                case 'mx_records':
+                    html = renderDomainMxRecords(data);
+                    break;
+                case 'historical_whois':
+                    html = renderDomainHistoricalWhois(data);
+                    break;
+                case 'historical_ssl_certificates':
+                    html = renderDomainSslCertificates(data);
+                    break;
+                case 'collections':
+                    html = renderDomainCollections(data);
+                    break;
+                default:
+                    html = '<p class="text-muted">Not implemented yet</p>';
+            }
+        }
+        
+        // Grey out title if no results
+        if (titleEl && !hasResults) {
+            const tooltip = titleEl.querySelector('.info-tooltip');
+            const tooltipHtml = tooltip ? tooltip.outerHTML : '';
+            titleEl.innerHTML = `${title} (0) ${tooltipHtml}`;
+            titleEl.classList.add('section-title-grey');
+        } else if (titleEl && hasResults) {
+            // Remove grey class if results exist
+            titleEl.classList.remove('section-title-grey');
+        }
+        
+        container.innerHTML = html;
+        
+    } catch (error) {
+        console.error(`Error loading ${relationship}:`, error);
+        container.innerHTML = `<p class="text-error">Error loading data: ${escapeHtml(error.message)}</p>`;
+    }
+};
+
+/**
+ * Load all domain relations at once
+ */
+window.loadAllDomainRelations = async function() {
+    const relationships = [
+        { rel: 'downloaded_files', title: 'Downloaded Files', id: 'domain-downloaded_files' },
+        { rel: 'urls', title: 'URLs', id: 'domain-urls' },
+        { rel: 'subdomains', title: 'Subdomains', id: 'domain-subdomains' },
+        { rel: 'soa_records', title: 'SOA Records', id: 'domain-soa_records' },
+        { rel: 'resolutions', title: 'DNS Resolutions', id: 'domain-resolutions' },
+        { rel: 'referrer_files', title: 'Referrer Files', id: 'domain-referrer_files' },
+        { rel: 'ns_records', title: 'NS Records', id: 'domain-ns_records' },
+        { rel: 'mx_records', title: 'MX Records', id: 'domain-mx_records' },
+        { rel: 'historical_whois', title: 'Historical WHOIS', id: 'domain-historical_whois' },
+        { rel: 'historical_ssl_certificates', title: 'Historical SSL Certificates', id: 'domain-historical_ssl_certificates' },
+        { rel: 'communicating_files', title: 'Communicating Files', id: 'domain-communicating_files' },
+        { rel: 'collections', title: 'Collections', id: 'domain-collections' }
+    ];
+    
+    showToast('Loading all domain relations...', 'info');
+    
+    // Load all relationships in parallel
+    const loadPromises = relationships.map(async (rel) => {
+        try {
+            // Trigger the load function
+            await window.loadDomainRelation(rel.rel, rel.title, rel.id);
+        } catch (error) {
+            console.error(`Failed to load ${rel.rel}:`, error);
+        }
+    });
+    
+    await Promise.all(loadPromises);
+    showToast('All domain relations loaded', 'success');
 };
 
 /**
@@ -3714,30 +4535,106 @@ function renderIpSslCertificates(data) {
 /**
  * Render Historical WHOIS as table (for Relations tab)
  */
-function renderIpHistoricalWhoisTable(data) {
+function renderDomainHistoricalWhois(data) {
     let html = '<table class="table relation-table"><thead><tr>';
-    html += '<th>№</th><th>First Seen</th><th>Last Updated</th><th>Country</th><th>Key Changes</th>';
+    html += '<th>Last Updated</th><th>Registrar</th><th>Registrant</th>';
     html += '</tr></thead><tbody>';
     
     data.data.forEach((item, index) => {
         const attrs = item.attributes;
-        const firstSeen = attrs.first_seen_date ? formatTimestamp(attrs.first_seen_date) : '-';
-        const lastUpdated = attrs.last_updated ? formatTimestamp(attrs.last_updated) : '-';
-        const country = attrs.registrant_country || '-';
         
-        let keyChanges = '-';
-        if (attrs.whois_map) {
-            const whoisMap = attrs.whois_map;
-            keyChanges = whoisMap.netname || whoisMap.organization || whoisMap['Organization Name'] || '-';
+        // Extract WHOIS data from correct structure
+        const lastUpdated = attrs.last_updated ? formatDateShort(attrs.last_updated) : '-';
+        
+        // Extract registrar from whois_map or registrar_name
+        let registrar = '-';
+        if (attrs.registrar_name) {
+            registrar = escapeHtml(attrs.registrar_name);
+        } else if (attrs.whois_map && attrs.whois_map.Registrar) {
+            registrar = escapeHtml(attrs.whois_map.Registrar);
         }
         
-        html += `<tr>
-            <td>${index + 1}</td>
-            <td>${firstSeen}</td>
-            <td>${lastUpdated}</td>
-            <td>${escapeHtml(country)}</td>
-            <td>${escapeHtml(keyChanges)}</td>
-        </tr>`;
+        // Extract registrant from whois_map
+        let registrant = '-';
+        if (attrs.whois_map) {
+            // Try different registrant field names
+            const registrantFields = [
+                'Registrant Name', 'Registrant Organization', 
+                'Registrant', 'Admin Name', 'Admin Organization'
+            ];
+            
+            for (const field of registrantFields) {
+                if (attrs.whois_map[field]) {
+                    registrant = escapeHtml(truncateString(attrs.whois_map[field], 50));
+                    break;
+                }
+            }
+        }
+        
+        html += `
+            <tr>
+                <td>${lastUpdated}</td>
+                <td>${registrar}</td>
+                <td title="${attrs.whois_map ? 'WHOIS data available' : ''}">${registrant}</td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Render IP historical WHOIS table (for Relations tab)
+ */
+function renderIpHistoricalWhoisTable(data) {
+    let html = '<table class="table relation-table"><thead><tr>';
+    html += '<th>Last Updated</th><th>Organization</th><th>Country</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.data.forEach((item, index) => {
+        const attrs = item.attributes;
+        
+        // Extract WHOIS data from correct structure
+        const lastUpdated = attrs.last_updated ? formatTimestamp(attrs.last_updated) : '-';
+        
+        // Extract organization from whois_map
+        let organization = '-';
+        if (attrs.registrant_country) {
+            organization = attrs.registrant_country;
+        } else if (attrs.whois_map) {
+            // Try different organization field names
+            const orgFields = ['org-name', 'Organization', 'OrgName', 'organization'];
+            for (const field of orgFields) {
+                if (attrs.whois_map[field]) {
+                    organization = escapeHtml(attrs.whois_map[field]);
+                    break;
+                }
+            }
+        }
+        
+        // Extract country from whois_map or registrant_country
+        let country = '-';
+        if (attrs.registrant_country) {
+            country = escapeHtml(attrs.registrant_country);
+        } else if (attrs.whois_map) {
+            // Try different country field names
+            const countryFields = ['Registrant Country', 'Country', 'registrant country', 'country'];
+            for (const field of countryFields) {
+                if (attrs.whois_map[field]) {
+                    country = escapeHtml(attrs.whois_map[field]);
+                    break;
+                }
+            }
+        }
+        
+        html += `
+            <tr>
+                <td>${lastUpdated}</td>
+                <td>${organization}</td>
+                <td>${country}</td>
+            </tr>
+        `;
     });
     
     html += '</tbody></table>';
@@ -3836,6 +4733,448 @@ function renderIpReferences(data) {
                 ${attrs.source ? `<div class="reference-source">Source: ${escapeHtml(attrs.source)}</div>` : ''}
                 ${attrs.description ? `<div class="reference-description">${escapeHtml(attrs.description)}</div>` : ''}
                 ${attrs.url ? `<div class="reference-link"><a href="${escapeHtml(attrs.url)}" target="_blank">View Reference →</a></div>` : ''}
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    return html;
+}
+
+// ==================== Domain Relations Helper Functions ====================
+
+/**
+ * Render domain lazy load section (collapsible)
+ */
+function renderDomainLazyLoadSection(relationship, title, description, tooltip = '') {
+    const sectionId = `domain-${relationship}`;
+    const tooltipHtml = tooltip ? `<span class="info-tooltip" title="${escapeHtml(tooltip)}">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <text x="8" y="12" text-anchor="middle" font-size="11" font-weight="bold">i</text>
+        </svg>
+    </span>` : '';
+    return `
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3 id="${sectionId}-title">${title} ${tooltipHtml}</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div class="section-content">
+                <div id="${sectionId}-content" class="lazy-section-content">
+                    <button class="btn-secondary" onclick="loadDomainRelation('${relationship}', '${title}', '${sectionId}')">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
+                            <path d="M21 3v5h-5"></path>
+                        </svg>
+                        Load ${title}
+                    </button>
+                    <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.875rem;">${description}</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// ==================== Domain Renderer Functions ====================
+
+/**
+ * Render domain files (downloaded, communicating, referrer)
+ */
+function renderDomainFiles(data) {
+    let html = '<table class="table relation-table"><thead><tr>';
+    html += '<th>Scanned Date</th><th>Hash</th><th>Detections</th><th>Size</th><th>Type</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.data.forEach((item, index) => {
+        const attrs = item.attributes;
+        const stats = attrs.last_analysis_stats || {};
+        const malicious = stats.malicious || 0;
+        const total = (stats.malicious || 0) + (stats.suspicious || 0) + (stats.undetected || 0) + (stats.harmless || 0);
+        const detectionClass = malicious > 0 ? 'text-error' : 'text-success';
+        
+        const fileName = attrs.names?.[0] || attrs.meaningful_name || 'Unknown';
+        const truncatedFileName = truncateString(fileName, 60); // Truncate to 60 characters
+        const fileSize = attrs.size ? formatFileSize(attrs.size) : '-';
+        const fileType = attrs.type_description || attrs.file_type || '-';
+        const scannedDate = attrs.last_analysis_date ? formatDateShort(attrs.last_analysis_date) : '-';
+        
+        html += `
+            <tr>
+                <td>${scannedDate}</td>
+                <td><a href="result.html?type=file&id=${item.id}" class="hash-link">${item.id.substring(0, 16)}...</a></td>
+                <td class="${detectionClass}">${malicious}/${total}</td>
+                <td>${fileSize}</td>
+                <td>${escapeHtml(fileType)}</td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Render domain URLs
+ */
+function renderDomainUrls(data) {
+    let html = '<table class="table relation-table"><thead><tr>';
+    html += '<th>Scanned Date</th><th>URL</th><th>Detections</th><th>Status</th><th>First Seen</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.data.forEach((item, index) => {
+        const attrs = item.attributes;
+        const stats = attrs.last_analysis_stats || {};
+        const malicious = stats.malicious || 0;
+        const total = (stats.malicious || 0) + (stats.suspicious || 0) + (stats.undetected || 0) + (stats.harmless || 0);
+        const detectionClass = malicious > 0 ? 'text-error' : 'text-success';
+        const status = malicious > 0 ? 'Malicious' : 'Clean';
+        
+        const scannedDate = attrs.last_analysis_date ? formatDateShort(attrs.last_analysis_date) : '-';
+        const firstSeen = attrs.first_submission_date ? formatDateShort(attrs.first_submission_date) : '-';
+        
+        html += `
+            <tr>
+                <td>${scannedDate}</td>
+                <td><a href="result.html?type=url&id=${item.id}" class="url-link">${escapeHtml(truncateString(attrs.url, 80))}</a></td>
+                <td class="${detectionClass}">${malicious}/${total}</td>
+                <td><span class="badge ${malicious > 0 ? 'badge-danger' : 'badge-success'}">${status}</span></td>
+                <td>${firstSeen}</td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Render domain subdomains
+ */
+function renderDomainSubdomains(data) {
+    let html = '<table class="table relation-table"><thead><tr>';
+    html += '<th>Scanned Date</th><th>Subdomain</th><th>Detections</th><th>Status</th><th>Last Modified</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.data.forEach((item, index) => {
+        const attrs = item.attributes;
+        const stats = attrs.last_analysis_stats || {};
+        const malicious = stats.malicious || 0;
+        const total = (stats.malicious || 0) + (stats.suspicious || 0) + (stats.undetected || 0) + (stats.harmless || 0);
+        const detectionClass = malicious > 0 ? 'text-error' : 'text-success';
+        const status = malicious > 0 ? 'Malicious' : 'Clean';
+        
+        const scannedDate = attrs.last_analysis_date ? formatDateShort(attrs.last_analysis_date) : '-';
+        const lastModified = attrs.last_modification_date ? formatDateShort(attrs.last_modification_date) : '-';
+        
+        html += `
+            <tr>
+                <td>${scannedDate}</td>
+                <td><a href="result.html?type=domain&id=${item.id}" class="domain-link">${escapeHtml(item.id)}</a></td>
+                <td class="${detectionClass}">${malicious}/${total}</td>
+                <td><span class="badge ${malicious > 0 ? 'badge-danger' : 'badge-success'}">${status}</span></td>
+                <td>${lastModified}</td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Render domain SOA records
+ */
+function renderDomainSoaRecords(data) {
+    let html = '<table class="table relation-table"><thead><tr>';
+    html += '<th>Domain</th><th>Expire</th><th>Minimum</th><th>Refresh</th><th>Retry</th><th>RName</th><th>Serial</th><th>TTL</th><th>Last Seen</th>';
+    html += '</tr></thead><tbody>';
+    
+    if (!data || !data.data || data.data.length === 0) {
+        html += '<tr><td colspan="9" class="text-muted">No SOA records found</td></tr>';
+    } else {
+        data.data.forEach((item, index) => {
+            // context_attributes is at the top level of the item, not inside attributes
+            const soaRecord = item.context_attributes || {};
+            
+            html += `
+                <tr>
+                    <td><a href="result.html?type=domain&id=${item.id}" class="domain-link">${escapeHtml(item.id)}</a></td>
+                    <td>${soaRecord.expire || '-'}</td>
+                    <td>${soaRecord.minimum || '-'}</td>
+                    <td>${soaRecord.refresh || '-'}</td>
+                    <td>${soaRecord.retry || '-'}</td>
+                    <td>${escapeHtml(soaRecord.rname || '-')}</td>
+                    <td>${soaRecord.serial || '-'}</td>
+                    <td>${soaRecord.ttl || '-'}</td>
+                    <td>${soaRecord.timestamp ? formatDateShort(soaRecord.timestamp) : '-'}</td>
+                </tr>
+            `;
+        });
+    }
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Render domain resolutions (IP addresses)
+ */
+function renderDomainResolutions(data) {
+    let html = '<table class="table relation-table"><thead><tr>';
+    html += '<th>Date Resolved</th><th>IP Address</th><th>Detection Rate</th><th>Type</th><th>Resolver</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.data.forEach((item, index) => {
+        const attrs = item.attributes;
+        
+        // Extract IP address from attributes, not from item.id
+        const ip = attrs.ip_address || '-';
+        const ipType = ip.includes(':') ? 'AAAA' : 'A';
+        
+        // Calculate detection rate from IP analysis stats (only count malicious, not suspicious)
+        const ipStats = attrs.ip_address_last_analysis_stats || {};
+        const malicious = ipStats.malicious || 0;
+        const total = (ipStats.malicious || 0) + (ipStats.suspicious || 0) + (ipStats.undetected || 0) + (ipStats.harmless || 0);
+        const detectionRate = `${malicious}/${total}`;
+        const detectionClass = malicious > 0 ? 'text-error' : 'text-success';
+        
+        // Date resolved and resolver
+        const resolvedDate = attrs.date ? formatDateShort(attrs.date) : '-';
+        const resolver = attrs.resolver || '-';
+        
+        html += `
+            <tr>
+                <td>${resolvedDate}</td>
+                <td><a href="result.html?type=ip&id=${ip}" class="ip-link">${escapeHtml(ip)}</a></td>
+                <td class="${detectionClass}">${detectionRate}</td>
+                <td><span class="badge badge-secondary">${ipType}</span></td>
+                <td>${escapeHtml(resolver)}</td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Render domain references
+ */
+function renderDomainReferences(data) {
+    let html = '<div class="references-list">';
+    
+    if (!data || !data.data || data.data.length === 0) {
+        html += '<p class="text-muted">No references found</p>';
+        html += '</div>';
+        return html;
+    }
+    
+    data.data.forEach((item, index) => {
+        // Add safety check for attributes
+        const attrs = item.attributes || {};
+        const title = attrs.title || 'Untitled Reference';
+        const description = attrs.description || 'No description available';
+        const url = attrs.url || '#';
+        const date = attrs.date ? formatTimestamp(attrs.date) : 'Unknown date';
+        
+        html += `
+            <div class="reference-item">
+                <div class="reference-header">
+                    <h4 class="reference-title">${escapeHtml(title)}</h4>
+                    <span class="reference-date">${date}</span>
+                </div>
+                <div class="reference-description">${escapeHtml(description)}</div>
+                ${url !== '#' ? `<div class="reference-link"><a href="${escapeHtml(url)}" target="_blank">View Reference →</a></div>` : ''}
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    return html;
+}
+
+/**
+ * Render domain NS records
+ */
+function renderDomainNsRecords(data) {
+    let html = '<table class="table relation-table"><thead><tr>';
+    html += '<th>Last Seen</th><th>Nameserver</th><th>Type</th><th>TTL</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.data.forEach((item, index) => {
+        const attrs = item.attributes;
+        const nsContext = item.context_attributes || {};
+        
+        // Use context_attributes for TTL and timestamp (like SOA records)
+        const ttl = nsContext.ttl || '-';
+        const lastSeen = nsContext.timestamp ? formatDateShort(nsContext.timestamp) : '-';
+        const nsType = 'NS'; // All NS records are type NS
+        const nsName = item.id; // The domain ID is the nameserver
+        
+        html += `
+            <tr>
+                <td>${lastSeen}</td>
+                <td><a href="result.html?type=domain&id=${nsName}" class="domain-link">${escapeHtml(nsName)}</a></td>
+                <td><span class="badge badge-secondary">${nsType}</span></td>
+                <td>${ttl}</td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Render domain MX records
+ */
+function renderDomainMxRecords(data) {
+    let html = '<table class="table relation-table"><thead><tr>';
+    html += '<th>Last Seen</th><th>Mail Server</th><th>Type</th><th>Priority</th><th>TTL</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.data.forEach((item, index) => {
+        const attrs = item.attributes;
+        const mxContext = item.context_attributes || {};
+        
+        // Use context_attributes for TTL, timestamp, and MX-specific fields
+        const ttl = mxContext.ttl || '-';
+        const lastSeen = mxContext.timestamp ? formatDateShort(mxContext.timestamp) : '-';
+        const priority = mxContext.preference || mxContext.priority || '-';
+        const mxType = 'MX'; // All MX records are type MX
+        const mailServer = item.id; // The domain ID is the mail server
+        
+        html += `
+            <tr>
+                <td>${lastSeen}</td>
+                <td><a href="result.html?type=domain&id=${mailServer}" class="domain-link">${escapeHtml(mailServer)}</a></td>
+                <td><span class="badge badge-secondary">${mxType}</span></td>
+                <td>${priority}</td>
+                <td>${ttl}</td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Render domain SSL certificates
+ */
+function renderDomainSslCertificates(data) {
+    let html = '<table class="table relation-table"><thead><tr>';
+    html += '<th>First Seen</th><th>Serial</th><th>Issuer</th><th>Subject</th><th>Valid From</th><th>Valid Until</th><th>Algorithm</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.data.forEach((item, index) => {
+        const attrs = item.attributes;
+        
+        // Format issuer object to string
+        const issuer = attrs.issuer ? 
+            [attrs.issuer.C, attrs.issuer.O, attrs.issuer.CN].filter(Boolean).join(', ') : '-';
+        
+        // Format subject object to string  
+        const subject = attrs.subject ? 
+            [attrs.subject.C, attrs.subject.O, attrs.subject.CN].filter(Boolean).join(', ') : '-';
+        
+        // Handle validity dates - they're strings, not timestamps
+        const validFrom = attrs.validity?.not_before || '-';
+        const validUntil = attrs.validity?.not_after || '-';
+        
+        // First seen date is a timestamp
+        const firstSeen = attrs.first_seen_date ? formatDateShort(attrs.first_seen_date) : '-';
+        
+        // Signature algorithm is in cert_signature object
+        const algorithm = attrs.cert_signature?.signature_algorithm || '-';
+        
+        html += `
+            <tr>
+                <td>${firstSeen}</td>
+                <td><code>${escapeHtml(truncateString(attrs.serial_number || '-', 20))}</code></td>
+                <td>${escapeHtml(truncateString(issuer, 50))}</td>
+                <td>${escapeHtml(truncateString(subject, 50))}</td>
+                <td>${validFrom}</td>
+                <td>${validUntil}</td>
+                <td>${escapeHtml(algorithm)}</td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table>';
+    return html;
+}
+
+/**
+ * Render domain collections
+ */
+function renderDomainCollections(data) {
+    let html = '<div class="collections-list" style="width: 100%;">';
+    
+    data.data.forEach(item => {
+        const attrs = item.attributes;
+        const counters = attrs.counters || {};
+        
+        // Format dates
+        const creationDate = attrs.creation_date ? formatDateShort(attrs.creation_date) : null;
+        const modificationDate = attrs.last_modification_date ? formatDateShort(attrs.last_modification_date) : null;
+        
+        // Prepare tags
+        const tags = attrs.autogenerated_tags || [];
+        const tagBadges = tags.slice(0, 8).map(tag => 
+            `<span class="collection-tag">${escapeHtml(tag)}</span>`
+        ).join('');
+        
+        // Alt names
+        const altNames = attrs.alt_names || [];
+        const altNamesText = altNames.length > 0 
+            ? `<div class="collection-alt-names"><strong>Alt Names:</strong> ${altNames.map(n => escapeHtml(n)).join(', ')}</div>`
+            : '';
+        
+        html += `
+            <div class="collection-card" style="width: 100%; box-sizing: border-box;">
+                <div class="collection-header">
+                    <div class="collection-title">
+                        <strong>${escapeHtml(attrs.name || 'Unnamed Collection')}</strong>
+                        <span class="collection-type">${escapeHtml(attrs.collection_type || 'collection')}</span>
+                    </div>
+                    ${attrs.origin ? `<span class="collection-origin">${escapeHtml(attrs.origin)}</span>` : ''}
+                </div>
+                
+                ${attrs.description ? `<div class="collection-description">${escapeHtml(attrs.description)}</div>` : ''}
+                
+                ${counters.files || counters.domains || counters.ip_addresses || counters.urls ? `
+                    <div class="collection-counters">
+                        <strong>Counters:</strong>
+                        ${counters.files ? `<span>Files: ${counters.files}</span>` : ''}
+                        ${counters.domains ? `<span>Domains: ${counters.domains}</span>` : ''}
+                        ${counters.ip_addresses ? `<span>IPs: ${counters.ip_addresses}</span>` : ''}
+                        ${counters.urls ? `<span>URLs: ${counters.urls}</span>` : ''}
+                    </div>
+                ` : ''}
+                
+                ${tagBadges ? `
+                    <div class="collection-tags">
+                        <strong>Tags:</strong>
+                        <div class="collection-tags-list">${tagBadges}</div>
+                    </div>
+                ` : ''}
+                
+                ${altNamesText}
+                
+                <div class="collection-dates">
+                    ${creationDate ? `<span><strong>Created:</strong> ${creationDate}</span>` : ''}
+                    ${modificationDate ? `<span><strong>Modified:</strong> ${modificationDate}</span>` : ''}
+                </div>
+                
+                ${attrs.link ? `
+                    <div class="collection-actions">
+                        <a href="${escapeHtml(attrs.link)}" target="_blank" class="btn-secondary btn-sm">
+                            🔗 Reference link
+                        </a>
+                    </div>
+                ` : ''}
             </div>
         `;
     });

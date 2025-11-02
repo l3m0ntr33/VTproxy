@@ -29,17 +29,19 @@ export function createPropertyRow(label, value, monospace = false, allowHtml = f
 }
 
 /**
- * Create a section with collapsible content
+ * Create an expandable section
  * @param {string} title - Section title
  * @param {string} content - Section content HTML
  * @param {boolean} expanded - Initial state
+ * @param {boolean} greyTitle - Grey out the title if no data available
  * @returns {string} HTML string
  */
-export function createExpandableSection(title, content, expanded = false) {
+export function createExpandableSection(title, content, expanded = false, greyTitle = false) {
+    const titleClass = greyTitle ? 'section-title-grey' : '';
     return `
         <div class="expandable-section ${expanded ? 'expanded' : ''}">
             <div class="section-header" onclick="toggleSection(this)">
-                <h3>${escapeHtml(title)}</h3>
+                <h3 class="${titleClass}">${escapeHtml(title)}</h3>
                 <span class="chevron">▼</span>
             </div>
             <div class="section-content">
