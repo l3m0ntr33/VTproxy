@@ -61,10 +61,19 @@ jobs:
           # Get previous tag
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           if [ -z "$PREVIOUS_TAG" ]; then
-            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges)
+            # For first release, get all commits excluding version bumps
+            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges | grep -v "Bump version to")
           else
-            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges $PREVIOUS_TAG..HEAD)
+            # For subsequent releases, get commits between tags excluding version bumps
+            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges $PREVIOUS_TAG..HEAD | grep -v "Bump version to")
           fi
+          
+          # If no changes after filtering, get the actual feature commits
+          if [ -z "$CHANGELOG" ]; then
+            echo "No feature commits found, getting all commits between tags..."
+            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges $PREVIOUS_TAG..HEAD^ | head -20)
+          fi
+          
           echo "changelog<<EOF" >> $GITHUB_OUTPUT
           echo "## What's Changed" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
