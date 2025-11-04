@@ -1,7 +1,7 @@
 {
   "name": "vtproxy",
   "productName": "vtproxy",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "VirusTotal proxy interface",
   "author": "Orange Cyberdefense CERT",
   "copyright": "© 2025 Orange Cyberdefense CERT",
