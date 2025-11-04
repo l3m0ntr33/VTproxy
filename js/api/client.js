@@ -205,6 +205,16 @@ export class VTClient {
         return this.fetch(`/files/${hash}/${relationship}?limit=${limit}`);
     }
     
+    /**
+     * Get file submission history
+     * @param {string} hash - File hash
+     * @param {number} limit - Number of submissions
+     * @returns {Promise<Object>} Submissions data
+     */
+    async getFileSubmissions(hash, limit = 40) {
+        return this.fetch(`/files/${hash}/submissions?limit=${limit}`);
+    }
+    
     // ==================== URL Endpoints ====================
     
     /**

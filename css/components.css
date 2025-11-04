@@ -3,6 +3,31 @@
    ========================================== */
 
 /* ==========================================
+   Sandbox Summary Cards
+   ========================================== */
+
+.sandbox-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-color: var(--primary-color);
+}
+
+.sandbox-card .status-malicious {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--error-color);
+}
+
+.sandbox-card .status-clean {
+    background: rgba(34, 197, 94, 0.1);
+    color: var(--success-color);
+}
+
+.sandbox-card .status-suspicious {
+    background: rgba(251, 191, 36, 0.1);
+    color: var(--warning-color);
+}
+
+/* ==========================================
    Modal
    ========================================== */
 
@@ -1350,7 +1375,8 @@ code {
     transform: rotate(180deg);
 }
 
-.section-content {
+/* Old expandable sections with class toggle (keep for backwards compatibility) */
+.expandable-section:not(details) .section-content {
     max-height: 0;
     overflow: hidden;
     transition: max-height var(--transition-slow);
@@ -1360,6 +1386,12 @@ code {
     max-height: 10000px;
     padding: var(--spacing-lg);
     border-top: 1px solid var(--bg-tertiary);
+}
+
+/* Native details/summary expandable sections - NO max-height restriction */
+details .section-content {
+    max-height: none !important;
+    overflow: visible !important;
 }
 
 /* ==========================================
@@ -1806,7 +1838,7 @@ code {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.875rem;
-    table-layout: fixed;
+    table-layout: auto;
 }
 
 .contacted-table thead {
@@ -1839,15 +1871,18 @@ code {
 }
 
 .domain-link,
-.ip-link {
-    color: var(--text-primary);
+.ip-link,
+.url-link,
+.file-link {
+    color: var(--orange-primary);
     text-decoration: none;
     font-weight: 500;
 }
 
 .domain-link:hover,
-.ip-link:hover {
-    color: var(--orange-primary);
+.ip-link:hover,
+.url-link:hover,
+.file-link:hover {
     text-decoration: underline;
 }
 
@@ -1859,30 +1894,25 @@ code {
     font-weight: 600;
 }
 
-/* Column widths for better distribution */
+/* Column widths - flexible for different table layouts */
+.contacted-table th,
+.contacted-table td {
+    min-width: 80px;
+}
+
+/* First column (domain/ip/filename) gets more space */
 .contacted-table th:nth-child(1),
 .contacted-table td:nth-child(1) {
-    width: 25%;
+    min-width: 200px;
 }
 
-.contacted-table th:nth-child(2),
-.contacted-table td:nth-child(2) {
-    width: 12%;
-}
-
-.contacted-table th:nth-child(3),
-.contacted-table td:nth-child(3) {
-    width: 13%;
-}
-
-.contacted-table th:nth-child(4),
-.contacted-table td:nth-child(4) {
-    width: 25%;
-}
-
-.contacted-table th:nth-child(5),
-.contacted-table td:nth-child(5) {
-    width: 25%;
+/* Date columns - fixed width for consistency */
+.contacted-table th:nth-last-child(-n+2),
+.contacted-table td:nth-last-child(-n+2) {
+    white-space: nowrap;
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    font-size: 0.813rem;
+    width: 110px;
 }
 
 /* ==========================================
@@ -2298,6 +2328,644 @@ code {
     color: var(--text-secondary);
 }
 
+/* Behavior collapsible sections */
+.sandbox-report summary::-webkit-details-marker,
+.expandable-section summary::-webkit-details-marker,
+.process-node summary::-webkit-details-marker {
+    display: none;
+}
+
+.sandbox-report[open] > summary > span:first-child,
+.expandable-section[open] > summary > span:first-child {
+    transform: rotate(90deg);
+    transition: transform 0.2s ease;
+}
+
+.sandbox-report summary > span:first-child,
+.expandable-section summary > span:first-child {
+    transition: transform 0.2s ease;
+}
+
+.sandbox-report summary:hover,
+.expandable-section summary:hover {
+    background: var(--bg-hover) !important;
+}
+
+/* Adjust border radius when open */
+.sandbox-report[open] > summary,
+.expandable-section[open] > summary {
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0 !important;
+}
+
+.expandable-section[open] > summary {
+    border-radius: var(--radius-md) var(--radius-md) 0 0 !important;
+}
+
+/* Process tree collapsible nodes */
+.process-node summary {
+    transition: all 0.2s ease;
+}
+
+.process-node summary:hover > div {
+    background: var(--bg-hover) !important;
+}
+
+.process-toggle {
+    transition: transform 0.2s ease;
+    display: inline-block;
+}
+
+.process-node[open] .process-toggle {
+    transform: rotate(90deg);
+}
+
+.process-children {
+    animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ==========================================
+   Collapsible Card Sections
+   ========================================== */
+
+.collapsible-card {
+    margin-bottom: var(--spacing-sm);
+}
+
+.collapsible-card-inner {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.collapsible-card .collapsible-header {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem var(--spacing-lg);
+    border-bottom: none;
+    transition: background var(--transition-fast);
+}
+
+.collapsible-card .collapsible-header:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.collapsible-card .collapsible-header .card-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0;
+    padding: 0;
+    line-height: 1.2;
+    color: var(--text-primary);
+}
+
+.collapsible-card .collapsible-header:hover .card-title {
+    color: var(--accent-color);
+}
+
+.collapse-icon {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    transition: transform 0.2s ease;
+    opacity: 0.7;
+}
+
+.collapsible-content {
+    max-height: 10000px;
+    overflow: hidden;
+    transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease;
+    opacity: 1;
+    border-top: 1px solid var(--bg-tertiary);
+}
+
+.collapsible-content.collapsed {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    border-top: none;
+}
+
+/* ==========================================
+   Sigma Analysis Section
+   ========================================== */
+
+.sigma-summary {
+    margin-bottom: var(--spacing-lg);
+    padding-top: var(--spacing-md);
+}
+
+.sigma-source {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+}
+
+.sigma-source-name {
+    font-weight: 600;
+    margin-bottom: var(--spacing-sm);
+    color: var(--text-primary);
+}
+
+.sigma-stats {
+    display: flex;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+.sigma-badge {
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.813rem;
+    font-weight: 500;
+}
+
+.sigma-badge.sigma-critical {
+    background: rgba(220, 38, 38, 0.2);
+    color: #ef4444;
+}
+
+.sigma-badge.sigma-high {
+    background: rgba(249, 115, 22, 0.2);
+    color: #f97316;
+}
+
+.sigma-badge.sigma-medium {
+    background: rgba(251, 191, 36, 0.2);
+    color: #fbbf24;
+}
+
+.sigma-badge.sigma-low {
+    background: rgba(59, 130, 246, 0.2);
+    color: #3b82f6;
+}
+
+.sigma-rules {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.sigma-rule {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    border-left: 3px solid var(--border-color);
+}
+
+.sigma-rule-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+}
+
+.sigma-level {
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.sigma-level.sigma-high {
+    background: rgba(249, 115, 22, 0.2);
+    color: #f97316;
+}
+
+.sigma-level.sigma-medium {
+    background: rgba(251, 191, 36, 0.2);
+    color: #fbbf24;
+}
+
+.sigma-level.sigma-low {
+    background: rgba(59, 130, 246, 0.2);
+    color: #3b82f6;
+}
+
+.sigma-rule-title {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.sigma-rule-description {
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: var(--spacing-sm);
+}
+
+.sigma-rule-meta {
+    font-size: 0.813rem;
+    color: var(--text-muted);
+}
+
+/* ==========================================
+   Sandbox Verdicts Section
+   ========================================== */
+
+.sandbox-verdicts {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: var(--spacing-md);
+}
+
+.sandbox-verdict {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+}
+
+.sandbox-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-sm);
+}
+
+.sandbox-name {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.sandbox-category {
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.813rem;
+    font-weight: 500;
+}
+
+.sandbox-malware {
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-xs);
+    font-size: 0.875rem;
+}
+
+.sandbox-classification {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+}
+
+.sandbox-tag {
+    padding: 0.25rem 0.5rem;
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* ==========================================
+   Popular Threat Classification Section
+   ========================================== */
+
+.threat-label {
+    padding: var(--spacing-md);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-lg);
+}
+
+.threat-label-value {
+    color: var(--orange-primary);
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.threat-section {
+    margin-bottom: var(--spacing-lg);
+}
+
+.threat-section:last-child {
+    margin-bottom: 0;
+}
+
+.threat-section-title {
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-sm);
+    text-transform: uppercase;
+}
+
+.threat-items {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--spacing-sm);
+}
+
+.threat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+
+.threat-value {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.threat-count {
+    font-weight: 600;
+    color: var(--orange-primary);
+    font-size: 0.875rem;
+}
+
+/* ==========================================
+   Crowdsourced IDS Results Section
+   ========================================== */
+
+.ids-rules {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.ids-rule {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    border-left: 3px solid var(--border-color);
+}
+
+.ids-rule-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+}
+
+.ids-severity {
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.ids-rule-msg {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.ids-rule-meta {
+    display: flex;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-sm);
+    font-size: 0.813rem;
+}
+
+.ids-source {
+    color: var(--text-secondary);
+}
+
+.ids-category {
+    color: var(--text-muted);
+}
+
+.ids-contexts {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.ids-context {
+    font-size: 0.813rem;
+    color: var(--text-secondary);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+}
+
+/* ==========================================
+   Contacted/Relation Tables
+   ========================================== */
+
+.contacted-table td:first-child {
+    max-width: 400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.contacted-table .file-link,
+.contacted-table .domain-link,
+.contacted-table .ip-link,
+.contacted-table .url-link {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ==========================================
+   TrID Display
+   ========================================== */
+
+.trid-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.trid-entry {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+
+.trid-type {
+    color: var(--text-primary);
+    flex: 1;
+}
+
+.trid-probability {
+    color: var(--accent-color);
+    font-weight: 600;
+    font-size: 0.875rem;
+    margin-left: var(--spacing-md);
+}
+
+/* ==========================================
+   DetectItEasy Display
+   ========================================== */
+
+.die-detections {
+    margin-top: var(--spacing-md);
+}
+
+.die-detection {
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--spacing-sm);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.die-detection strong {
+    color: var(--text-primary);
+}
+
+.die-type {
+    margin-left: auto;
+    padding: 0.25rem 0.5rem;
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* ==========================================
+   Certificate Display
+   ========================================== */
+
+.cert-list {
+    margin-top: var(--spacing-md);
+}
+
+.cert-item {
+    padding: var(--spacing-md);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-md);
+}
+
+.cert-item:last-child {
+    margin-bottom: 0;
+}
+
+.cert-header {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-sm);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* ==========================================
+   Malware Configuration Display
+   ========================================== */
+
+.malware-family {
+    margin-bottom: var(--spacing-lg);
+    padding: var(--spacing-md);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+}
+
+.malware-family:last-child {
+    margin-bottom: 0;
+}
+
+.malware-family-header {
+    margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 2px solid var(--red);
+}
+
+.malware-family-name {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--red);
+    text-transform: uppercase;
+}
+
+.malware-config-item {
+    margin-bottom: var(--spacing-md);
+}
+
+.malware-connections-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-top: var(--spacing-md);
+    margin-bottom: var(--spacing-sm);
+}
+
+.malware-connections {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.malware-connection {
+    padding: var(--spacing-md);
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--red);
+}
+
+.connection-header {
+    margin-bottom: var(--spacing-sm);
+}
+
+.connection-url {
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    font-weight: 600;
+    color: var(--orange-primary);
+    word-break: break-all;
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
+.connection-url:hover {
+    color: var(--accent-color);
+    text-decoration: underline;
+}
+
+.clickable-value {
+    color: var(--accent-color);
+    text-decoration: none;
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    transition: all 0.2s ease;
+}
+
+.clickable-value:hover {
+    text-decoration: underline;
+    opacity: 0.8;
+}
+
+.malware-badge {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-right: var(--spacing-xs);
+}
+
+.badge-category {
+    background: rgba(220, 38, 38, 0.2);
+    color: #ef4444;
+}
+
+.badge-protocol {
+    background: rgba(59, 130, 246, 0.2);
+    color: #3b82f6;
+}
+
 /* ==========================================
    Responsive Property Row
    ========================================== */
@@ -2310,5 +2978,10 @@ code {
     
     .property-label {
         font-weight: 600;
+    }
+    
+    .sandbox-verdicts,
+    .threat-items {
+        grid-template-columns: 1fr;
     }
 }

@@ -262,10 +262,33 @@ function renderEntityInfo() {
     switch (currentType) {
         case 'file':
         case 'hash':
-            title = attrs.meaningful_name || 
-                    attrs.names?.[0] || 
-                    currentData.id;
-            subtitle = `SHA-256: ${escapeHtml(attrs.sha256 || currentData.id)}`;
+            // Show SHA-256 as title
+            title = attrs.sha256 || currentData.id;
+            
+            // Show filename as subtitle
+            const filename = attrs.meaningful_name || attrs.names?.[0] || 'Unknown';
+            subtitle = escapeHtml(filename);
+            
+            // Build badges for tags (below filename)
+            const fileBadges = [];
+            
+            // Tags (limit to first 10 tags)
+            if (attrs.tags && attrs.tags.length > 0) {
+                const tagsToShow = attrs.tags.slice(0, 10);
+                tagsToShow.forEach(tag => {
+                    fileBadges.push(`<span class="info-badge badge-tag">${escapeHtml(tag)}</span>`);
+                });
+                
+                // Show "+X more" if there are additional tags
+                if (attrs.tags.length > 10) {
+                    const remaining = attrs.tags.length - 10;
+                    fileBadges.push(`<span class="info-badge badge-more">+${remaining} more</span>`);
+                }
+            }
+            
+            if (fileBadges.length > 0) {
+                extraBadges = `<div class="info-badges">${fileBadges.join('')}</div>`;
+            }
             break;
         case 'url':
             const decodedUrl = decodeUrlFromVT(currentId);
@@ -585,6 +608,8 @@ function getTabsForType() {
         return [
             ...baseTabs,
             { id: 'behavior', label: 'Behavior', content: renderBehaviorTab() },
+            { id: 'relations', label: 'Relations', content: renderRelationsTab() },
+            { id: 'telemetry', label: 'Telemetry', content: renderTelemetryTab() },
             communityTab
         ];
     }
@@ -633,9 +658,16 @@ function renderDetectionTab() {
     const results = currentData.attributes.last_analysis_results;
     const stats = currentData.attributes.last_analysis_stats;
     const analysisDate = currentData.attributes.last_analysis_date;
+    const attrs = currentData.attributes;
     
     if (!results) {
         return '<p class="text-muted">No detection results available</p>';
+    }
+    
+    // For files, show additional sections before the main vendors table
+    let additionalSections = '';
+    if (currentType === 'file' || currentType === 'hash') {
+        additionalSections = renderFileDetectionSections(attrs);
     }
     
     // Sort vendors by detection
@@ -643,8 +675,15 @@ function renderDetectionTab() {
         name,
         ...result
     })).sort((a, b) => {
-        const order = ['malicious', 'suspicious', 'undetected', 'harmless', 'timeout', 'failure'];
-        return order.indexOf(a.category) - order.indexOf(b.category);
+        const order = ['malicious', 'suspicious', 'undetected', 'harmless', 'timeout', 'confirmed-timeout', 'failure', 'type-unsupported'];
+        const indexA = order.indexOf(a.category);
+        const indexB = order.indexOf(b.category);
+        
+        // If category not found in order, put it at the end
+        const posA = indexA === -1 ? 999 : indexA;
+        const posB = indexB === -1 ? 999 : indexB;
+        
+        return posA - posB;
     });
     
     // Split vendors into two columns
@@ -735,6 +774,7 @@ function renderDetectionTab() {
     }
     
     return `
+        ${additionalSections}
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">Security Vendors' Analysis</h3>
@@ -768,6 +808,271 @@ function renderDetectionTab() {
 }
 
 /**
+ * Render file-specific detection sections
+ */
+function renderFileDetectionSections(attrs) {
+    let sections = '';
+    
+    // Sigma Analysis
+    if (attrs.sigma_analysis_summary || attrs.sigma_analysis_results) {
+        sections += renderSigmaAnalysis(attrs);
+    }
+    
+    // Sandbox Verdicts
+    if (attrs.sandbox_verdicts && Object.keys(attrs.sandbox_verdicts).length > 0) {
+        sections += renderSandboxVerdicts(attrs.sandbox_verdicts);
+    }
+    
+    // Popular Threat Classification
+    if (attrs.popular_threat_classification) {
+        sections += renderPopularThreatClassification(attrs.popular_threat_classification);
+    }
+    
+    // Crowdsourced IDS Results
+    if (attrs.crowdsourced_ids_results && attrs.crowdsourced_ids_results.length > 0) {
+        sections += renderCrowdsourcedIDS(attrs.crowdsourced_ids_results);
+    }
+    
+    return sections;
+}
+
+/**
+ * Render Sigma Analysis section
+ */
+function renderSigmaAnalysis(attrs) {
+    const summary = attrs.sigma_analysis_summary;
+    const results = attrs.sigma_analysis_results;
+    
+    if (!summary && !results) return '';
+    
+    const resultCount = results ? results.length : 0;
+    const sectionId = 'sigma-analysis';
+    
+    let content = '';
+    
+    // Summary stats
+    if (summary) {
+        const sources = Object.entries(summary).map(([source, stats]) => {
+            const critical = stats.critical || 0;
+            const high = stats.high || 0;
+            const medium = stats.medium || 0;
+            const low = stats.low || 0;
+            
+            return `
+                <div class="sigma-source">
+                    <div class="sigma-source-name">${escapeHtml(source)}</div>
+                    <div class="sigma-stats">
+                        ${critical > 0 ? `<span class="sigma-badge sigma-critical">Critical: ${critical}</span>` : ''}
+                        ${high > 0 ? `<span class="sigma-badge sigma-high">High: ${high}</span>` : ''}
+                        ${medium > 0 ? `<span class="sigma-badge sigma-medium">Medium: ${medium}</span>` : ''}
+                        ${low > 0 ? `<span class="sigma-badge sigma-low">Low: ${low}</span>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        content += `<div class="sigma-summary">${sources}</div>`;
+    }
+    
+    // Individual results
+    if (results && results.length > 0) {
+        const rules = results.map(rule => `
+            <div class="sigma-rule">
+                <div class="sigma-rule-header">
+                    <span class="sigma-level sigma-${rule.rule_level}">${escapeHtml(rule.rule_level)}</span>
+                    <span class="sigma-rule-title">${escapeHtml(rule.rule_title)}</span>
+                </div>
+                <div class="sigma-rule-description">${escapeHtml(rule.rule_description)}</div>
+                ${rule.rule_author ? `<div class="sigma-rule-meta">Author: ${escapeHtml(rule.rule_author)}</div>` : ''}
+            </div>
+        `).join('');
+        
+        content += `<div class="sigma-rules">${rules}</div>`;
+    }
+    
+    return `
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3>Sigma Analysis (${resultCount})</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div class="section-content">
+                ${content}
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Render Sandbox Verdicts section
+ */
+function renderSandboxVerdicts(verdicts) {
+    const sandboxCount = Object.keys(verdicts).length;
+    const sectionId = 'sandbox-verdicts';
+    
+    const sandboxes = Object.entries(verdicts).map(([name, verdict]) => {
+        const category = verdict.category;
+        const categoryClass = getStatusClass(category);
+        
+        let malwareInfo = '';
+        if (verdict.malware_names && verdict.malware_names.length > 0) {
+            malwareInfo = `<div class="sandbox-malware">Malware: ${verdict.malware_names.map(n => escapeHtml(n)).join(', ')}</div>`;
+        }
+        
+        let classification = '';
+        if (verdict.malware_classification && verdict.malware_classification.length > 0) {
+            classification = `<div class="sandbox-classification">${verdict.malware_classification.map(c => 
+                `<span class="sandbox-tag">${escapeHtml(c)}</span>`
+            ).join('')}</div>`;
+        }
+        
+        return `
+            <div class="sandbox-verdict">
+                <div class="sandbox-header">
+                    <span class="sandbox-name">${escapeHtml(verdict.sandbox_name || name)}</span>
+                    <span class="sandbox-category ${categoryClass}">${escapeHtml(category)}</span>
+                </div>
+                ${malwareInfo}
+                ${classification}
+            </div>
+        `;
+    }).join('');
+    
+    return `
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3>Sandbox Verdicts (${sandboxCount})</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div class="section-content">
+                <div class="sandbox-verdicts">${sandboxes}</div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Render Popular Threat Classification section
+ */
+function renderPopularThreatClassification(classification) {
+    const sectionId = 'popular-threat';
+    let content = '';
+    let totalItems = 0;
+    
+    if (classification.suggested_threat_label) {
+        content += `
+            <div class="threat-label">
+                <strong>Suggested Threat Label:</strong> 
+                <span class="threat-label-value">${escapeHtml(classification.suggested_threat_label)}</span>
+            </div>
+        `;
+    }
+    
+    // Popular threat names
+    if (classification.popular_threat_name && classification.popular_threat_name.length > 0) {
+        totalItems += classification.popular_threat_name.length;
+        const names = classification.popular_threat_name
+            .sort((a, b) => b.count - a.count)
+            .map(item => `
+                <div class="threat-item">
+                    <span class="threat-value">${escapeHtml(item.value)}</span>
+                    <span class="threat-count">${item.count}</span>
+                </div>
+            `).join('');
+        
+        content += `
+            <div class="threat-section">
+                <div class="threat-section-title">Popular Threat Names</div>
+                <div class="threat-items">${names}</div>
+            </div>
+        `;
+    }
+    
+    // Popular threat categories
+    if (classification.popular_threat_category && classification.popular_threat_category.length > 0) {
+        totalItems += classification.popular_threat_category.length;
+        const categories = classification.popular_threat_category
+            .sort((a, b) => b.count - a.count)
+            .map(item => `
+                <div class="threat-item">
+                    <span class="threat-value">${escapeHtml(item.value)}</span>
+                    <span class="threat-count">${item.count}</span>
+                </div>
+            `).join('');
+        
+        content += `
+            <div class="threat-section">
+                <div class="threat-section-title">Popular Threat Categories</div>
+                <div class="threat-items">${categories}</div>
+            </div>
+        `;
+    }
+    
+    return `
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3>Popular Threat Classification (${totalItems})</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div class="section-content">
+                ${content}
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Render Crowdsourced IDS Results section
+ */
+function renderCrowdsourcedIDS(results) {
+    const resultCount = results.length;
+    const sectionId = 'crowdsourced-ids';
+    
+    const rules = results.map(rule => {
+        const severityClass = rule.alert_severity === 'high' ? 'status-error' : 
+                             rule.alert_severity === 'medium' ? 'status-warning' : 'status-info';
+        
+        let contextInfo = '';
+        if (rule.alert_context && rule.alert_context.length > 0) {
+            const contexts = rule.alert_context.map(ctx => {
+                const parts = [];
+                if (ctx.url) parts.push(`URL: ${escapeHtml(ctx.url)}`);
+                if (ctx.src_ip) parts.push(`Src: ${escapeHtml(ctx.src_ip)}:${ctx.src_port}`);
+                if (ctx.dest_ip) parts.push(`Dst: ${escapeHtml(ctx.dest_ip)}:${ctx.dest_port}`);
+                return `<div class="ids-context">${parts.join(' | ')}</div>`;
+            }).join('');
+            contextInfo = `<div class="ids-contexts">${contexts}</div>`;
+        }
+        
+        return `
+            <div class="ids-rule">
+                <div class="ids-rule-header">
+                    <span class="ids-severity ${severityClass}">${escapeHtml(rule.alert_severity)}</span>
+                    <span class="ids-rule-msg">${escapeHtml(rule.rule_msg)}</span>
+                </div>
+                <div class="ids-rule-meta">
+                    <span class="ids-source">${escapeHtml(rule.rule_source)}</span>
+                    <span class="ids-category">${escapeHtml(rule.rule_category)}</span>
+                </div>
+                ${contextInfo}
+            </div>
+        `;
+    }).join('');
+    
+    return `
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3>Crowdsourced IDS Results (${resultCount})</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div class="section-content">
+                <div class="ids-rules">${rules}</div>
+            </div>
+        </div>
+    `;
+}
+
+/**
  * Render details tab content
  */
 function renderDetailsTab() {
@@ -792,16 +1097,39 @@ function renderDetailsTab() {
  * Render file details
  */
 function renderFileDetails(attrs) {
-    // Basic properties
+    // Basic properties with all hashes
     const basicProps = [
         createPropertyRow('MD5', attrs.md5, true),
         createPropertyRow('SHA-1', attrs.sha1, true),
         createPropertyRow('SHA-256', attrs.sha256, true),
+        createPropertyRow('Vhash', attrs.vhash, true),
+        createPropertyRow('Authentihash', attrs.authentihash, true),
+        createPropertyRow('Imphash', attrs.pe_info?.imphash, true),
+        createPropertyRow('SSDEEP', attrs.ssdeep, true),
+        createPropertyRow('TLSH', attrs.tlsh, true),
         createPropertyRow('File size', formatFileSize(attrs.size)),
         createPropertyRow('File type', attrs.type_description),
         createPropertyRow('Magic', attrs.magic),
-        createPropertyRow('TrID', attrs.trid?.[0]?.file_type),
-    ].join('');
+    ].filter(row => row).join('');
+    
+    // Add TrID section with all entries
+    let tridSection = '';
+    if (attrs.trid && attrs.trid.length > 0) {
+        const tridEntries = attrs.trid.map(entry => `
+            <div class="trid-entry">
+                <span class="trid-type">${escapeHtml(entry.file_type)}</span>
+                <span class="trid-probability">${entry.probability.toFixed(1)}%</span>
+            </div>
+        `).join('');
+        tridSection = `
+            <div class="property-row">
+                <div class="property-label">TrID</div>
+                <div class="property-value">
+                    <div class="trid-list">${tridEntries}</div>
+                </div>
+            </div>
+        `;
+    }
     
     // Names
     const names = attrs.names && attrs.names.length > 0
@@ -819,17 +1147,43 @@ function renderFileDetails(attrs) {
     // Signature info
     let signatureSection = '';
     if (attrs.signature_info) {
+        const sig = attrs.signature_info;
         const sigProps = [
-            createPropertyRow('Signed', attrs.signature_info.verified || 'No'),
-            createPropertyRow('Signers', attrs.signature_info.signers),
-            createPropertyRow('Subject', attrs.signature_info.subject),
-        ].join('');
-        signatureSection = `
-            <div class="card">
-                <div class="card-header">
-                    <h3 class="card-title">Signature Information</h3>
+            createPropertyRow('Product', sig.product),
+            createPropertyRow('Description', sig.description),
+            createPropertyRow('File version', sig['file version']),
+            createPropertyRow('Original name', sig['original name']),
+            createPropertyRow('Internal name', sig['internal name']),
+            createPropertyRow('Copyright', sig.copyright),
+        ].filter(row => row).join('');
+        
+        // X509 Certificates
+        let certInfo = '';
+        if (sig.x509 && sig.x509.length > 0) {
+            const certs = sig.x509.map((cert, index) => `
+                <div class="cert-item">
+                    <div class="cert-header">Certificate ${index + 1}: ${escapeHtml(cert.name || 'Unknown')}</div>
+                    ${createPropertyRow('Valid from', cert['valid from'])}
+                    ${createPropertyRow('Valid to', cert['valid to'])}
+                    ${createPropertyRow('Serial number', cert['serial number'])}
+                    ${createPropertyRow('Thumbprint', cert.thumbprint, true)}
+                    ${createPropertyRow('Issuer', cert['cert issuer'])}
                 </div>
-                <div class="card-body">${sigProps}</div>
+            `).join('');
+            certInfo = `<div class="cert-list">${certs}</div>`;
+        }
+        
+        const certCount = sig.x509 ? sig.x509.length : 0;
+        signatureSection = `
+            <div class="expandable-section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Signature Information${certCount > 0 ? ` (${certCount} certificates)` : ''}</h3>
+                    <span class="chevron">▼</span>
+                </div>
+                <div class="section-content">
+                    ${sigProps}
+                    ${certInfo}
+                </div>
             </div>
         `;
     }
@@ -844,37 +1198,211 @@ function renderFileDetails(attrs) {
             createPropertyRow('Imphash', attrs.pe_info.imphash, true),
         ].join('');
         peSection = `
-            <div class="card">
-                <div class="card-header">
-                    <h3 class="card-title">PE Information</h3>
+            <div class="expandable-section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>PE Information</h3>
+                    <span class="chevron">▼</span>
                 </div>
-                <div class="card-body">${peProps}</div>
+                <div class="section-content">
+                    ${peProps}
+                </div>
+            </div>
+        `;
+    }
+    
+    // DetectItEasy section
+    let detectItEasySection = '';
+    if (attrs.detectiteasy) {
+        const die = attrs.detectiteasy;
+        let dieContent = createPropertyRow('File type', die.filetype);
+        
+        if (die.values && die.values.length > 0) {
+            const detections = die.values.map(d => `
+                <div class="die-detection">
+                    <strong>${escapeHtml(d.name)}</strong>
+                    ${d.version ? ` (${escapeHtml(d.version)})` : ''}
+                    ${d.info ? ` - ${escapeHtml(d.info)}` : ''}
+                    <span class="die-type">${escapeHtml(d.type)}</span>
+                </div>
+            `).join('');
+            dieContent += `<div class="die-detections">${detections}</div>`;
+        }
+        
+        detectItEasySection = `
+            <div class="expandable-section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>DetectItEasy</h3>
+                    <span class="chevron">▼</span>
+                </div>
+                <div class="section-content">
+                    ${dieContent}
+                </div>
+            </div>
+        `;
+    }
+    
+    // ExifTool section
+    let exifToolSection = '';
+    if (attrs.exiftool) {
+        const exifProps = Object.entries(attrs.exiftool)
+            .map(([key, value]) => createPropertyRow(key, value))
+            .join('');
+        
+        const exifCount = Object.keys(attrs.exiftool).length;
+        exifToolSection = `
+            <div class="expandable-section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>ExifTool (${exifCount})</h3>
+                    <span class="chevron">▼</span>
+                </div>
+                <div class="section-content">
+                    ${exifProps}
+                </div>
+            </div>
+        `;
+    }
+    
+    // Malware Configuration section
+    let malwareConfigSection = '';
+    if (attrs.malware_config && attrs.malware_config.families && attrs.malware_config.families.length > 0) {
+        const families = attrs.malware_config.families.map(familyData => {
+            const familyName = familyData.family || 'Unknown';
+            
+            let configsHtml = '';
+            if (familyData.configs && familyData.configs.length > 0) {
+                configsHtml = familyData.configs.map(config => {
+                    let configContent = '';
+                    
+                    // Tool information
+                    if (config.tool) {
+                        configContent += createPropertyRow('Tool', config.tool);
+                    }
+                    
+                    // Network connections
+                    if (config.net_info && config.net_info.connections && config.net_info.connections.length > 0) {
+                        const connections = config.net_info.connections.map(conn => {
+                            // Create clickable URL link if available
+                            let urlDisplay = '';
+                            if (conn.url) {
+                                const encodedUrl = encodeUrlForVT(conn.url);
+                                urlDisplay = `<a href="result.html?type=url&id=${encodedUrl}" class="connection-url">${escapeHtml(conn.url)}</a>`;
+                            } else if (conn.host && conn.port) {
+                                urlDisplay = `<span class="connection-url">${escapeHtml(conn.host)}:${conn.port}</span>`;
+                            }
+                            
+                            // Create clickable host (IP) link if available
+                            let hostDisplay = '';
+                            if (conn.host) {
+                                // Check if host is an IP address
+                                const isIp = /^(\d{1,3}\.){3}\d{1,3}$/.test(conn.host) || conn.host.includes(':');
+                                if (isIp) {
+                                    hostDisplay = `<a href="result.html?type=ip&id=${encodeURIComponent(conn.host)}" class="clickable-value">${escapeHtml(conn.host)}</a>`;
+                                } else {
+                                    hostDisplay = escapeHtml(conn.host);
+                                }
+                            }
+                            
+                            return `
+                                <div class="malware-connection">
+                                    <div class="connection-header">
+                                        ${urlDisplay}
+                                    </div>
+                                    ${hostDisplay ? `
+                                        <div class="property-row">
+                                            <div class="property-label">Host</div>
+                                            <div class="property-value">${hostDisplay}</div>
+                                        </div>
+                                    ` : ''}
+                                    ${conn.port ? createPropertyRow('Port', conn.port) : ''}
+                                    ${conn.categories && conn.categories.length > 0 ? `
+                                        <div class="property-row">
+                                            <div class="property-label">Categories</div>
+                                            <div class="property-value">
+                                                ${conn.categories.map(cat => `<span class="malware-badge badge-category">${escapeHtml(cat)}</span>`).join('')}
+                                            </div>
+                                        </div>
+                                    ` : ''}
+                                    ${conn.protocol_tags && conn.protocol_tags.length > 0 ? `
+                                        <div class="property-row">
+                                            <div class="property-label">Protocols</div>
+                                            <div class="property-value">
+                                                ${conn.protocol_tags.map(proto => `<span class="malware-badge badge-protocol">${escapeHtml(proto)}</span>`).join('')}
+                                            </div>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `;
+                        }).join('');
+                        
+                        configContent += `
+                            <div class="malware-connections-title">Network Connections</div>
+                            <div class="malware-connections">${connections}</div>
+                        `;
+                    }
+                    
+                    return `<div class="malware-config-item">${configContent}</div>`;
+                }).join('');
+            }
+            
+            return `
+                <div class="malware-family">
+                    <div class="malware-family-header">
+                        <span class="malware-family-name">${escapeHtml(familyName)}</span>
+                    </div>
+                    ${configsHtml}
+                </div>
+            `;
+        }).join('');
+        
+        const familyCount = attrs.malware_config.families.length;
+        malwareConfigSection = `
+            <div class="expandable-section">
+                <div class="section-header" onclick="toggleSection(this)">
+                    <h3>Malware Configuration (${familyCount} ${familyCount === 1 ? 'family' : 'families'})</h3>
+                    <span class="chevron">▼</span>
+                </div>
+                <div class="section-content">
+                    ${families}
+                </div>
             </div>
         `;
     }
     
     return `
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">Basic Properties</h3>
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3>Basic Properties</h3>
+                <span class="chevron">▼</span>
             </div>
-            <div class="card-body">${basicProps}</div>
+            <div class="section-content">
+                ${basicProps}
+                ${tridSection}
+            </div>
         </div>
         
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">File Names</h3>
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3>File Names (${attrs.names?.length || 0})</h3>
+                <span class="chevron">▼</span>
             </div>
-            <div class="card-body">${names}</div>
+            <div class="section-content">
+                ${names}
+            </div>
         </div>
         
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">History</h3>
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3>History</h3>
+                <span class="chevron">▼</span>
             </div>
-            <div class="card-body">${timestamps}</div>
+            <div class="section-content">
+                ${timestamps}
+            </div>
         </div>
         
+        ${detectItEasySection}
+        ${malwareConfigSection}
+        ${exifToolSection}
         ${signatureSection}
         ${peSection}
     `;
@@ -1619,10 +2147,12 @@ function renderBehaviorTab() {
     // Placeholder for behavior data - will load on demand
     return `
         <div id="behavior-content">
-            <button id="load-behavior-btn" class="btn-primary" onclick="loadBehaviorData()">
-                Load Behavior Analysis
-            </button>
-            <p class="text-muted" style="margin-top: 1rem;">Click to load sandbox behavior data</p>
+            <div class="load-all-relations-container">
+                <button class="btn-secondary" onclick="loadBehaviorData()">
+                    Load Behavior Analysis
+                </button>
+                <span class="text-muted">Load sandbox behavior data from all vendors</span>
+            </div>
         </div>
     `;
 }
@@ -1631,15 +2161,94 @@ function renderBehaviorTab() {
  * Render relations tab content
  */
 function renderRelationsTab() {
-    if (currentType === 'url') {
+    if (currentType === 'file' || currentType === 'hash') {
+        return renderFileRelations();
+    } else if (currentType === 'url') {
         return renderUrlRelations();
     } else if (currentType === 'domain') {
         return renderDomainRelations();
     } else if (currentType === 'ip') {
         return renderIpRelations();
     } else {
-        return createEmptyState('Relations view is only available for URLs, domains, and IP addresses');
+        return createEmptyState('Relations view is only available for files, URLs, domains, and IP addresses');
     }
+}
+
+/**
+ * Render File relations
+ */
+function renderFileRelations() {
+    let sectionsHtml = '';
+    
+    // Add "Load All Relations" button at the top
+    sectionsHtml += `
+        <div class="load-all-relations-container">
+            <button class="btn-secondary" onclick="loadAllFileRelations()">
+                Load All Relations
+            </button>
+            <span class="text-muted">Load all relationship data at once</span>
+        </div>
+    `;
+    
+    // Define file-specific relationships
+    const fileRelations = [
+        { key: 'execution_parents', title: 'Execution Parents', tooltip: 'Files that executed this file' },
+        { key: 'contacted_domains', title: 'Contacted Domains', tooltip: 'Domains contacted by this file during execution' },
+        { key: 'contacted_ips', title: 'Contacted IPs', tooltip: 'IP addresses contacted by this file during execution' },
+        { key: 'contacted_urls', title: 'Contacted URLs', tooltip: 'URLs contacted by this file during execution' },
+        { key: 'dropped_files', title: 'Dropped Files', tooltip: 'Files dropped or created by this file during execution' },
+        { key: 'embedded_domains', title: 'Embedded Domains', tooltip: 'Domains found embedded in the file' },
+        { key: 'embedded_ips', title: 'Embedded IPs', tooltip: 'IP addresses found embedded in the file' },
+        { key: 'embedded_urls', title: 'Embedded URLs', tooltip: 'URLs found embedded in the file' },
+        { key: 'memory_pattern_domains', title: 'Memory Pattern Domains', tooltip: 'Domains found in memory patterns during execution' },
+        { key: 'memory_pattern_ips', title: 'Memory Pattern IPs', tooltip: 'IP addresses found in memory patterns during execution' },
+        { key: 'memory_pattern_urls', title: 'Memory Pattern URLs', tooltip: 'URLs found in memory patterns during execution' },
+        { key: 'itw_domains', title: 'ITW Domains', tooltip: 'Domains where this file was found in the wild' },
+        { key: 'itw_ips', title: 'ITW IPs', tooltip: 'IP addresses where this file was found in the wild' },
+        { key: 'itw_urls', title: 'ITW URLs', tooltip: 'URLs where this file was found in the wild' },
+        { key: 'pcap_parents', title: 'PCAP Parents', tooltip: 'PCAP files that contain network traffic from this file' },
+        { key: 'pcap_children', title: 'PCAP Children', tooltip: 'Files extracted from this PCAP network capture' },
+        { key: 'pe_resource_children', title: 'PE Resource Children', tooltip: 'Files embedded as PE resources' },
+        { key: 'pe_resource_parents', title: 'PE Resource Parents', tooltip: 'Files this file is embedded in as a PE resource' },
+        { key: 'similar_files', title: 'Similar Files', tooltip: 'Files similar to this file based on various criteria' },
+        { key: 'compressed_parents', title: 'Compressed Parents', tooltip: 'Archive files containing this file' },
+        { key: 'bundled_files', title: 'Bundled Files', tooltip: 'Files bundled within this file' },
+    ];
+    
+    fileRelations.forEach(relation => {
+        sectionsHtml += renderFileLazyLoadSection(relation.key, relation.title, relation.tooltip);
+    });
+    
+    return sectionsHtml;
+}
+
+/**
+ * Render a lazy-load section for file relations
+ */
+function renderFileLazyLoadSection(sectionId, title, tooltip) {
+    const tooltipHtml = tooltip ? `<span class="info-tooltip" title="${escapeHtml(tooltip)}">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5"></circle>
+            <text x="8" y="12" text-anchor="middle" font-size="11" font-weight="bold">i</text>
+        </svg>
+    </span>` : '';
+    return `
+        <div class="expandable-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3 id="${sectionId}-title">${title} ${tooltipHtml}</h3>
+                <span class="chevron">▼</span>
+            </div>
+            <div class="section-content">
+                <button class="btn-secondary" onclick="loadFileRelation('${sectionId}')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
+                        <path d="M21 3v5h-5"></path>
+                    </svg>
+                    Load ${title}
+                </button>
+            </div>
+        </div>
+    `;
 }
 
 /**
@@ -1942,10 +2551,9 @@ function renderRelatedUrlsTable(urls) {
         const malicious = stats.malicious || 0;
         const total = Object.values(stats).reduce((sum, val) => sum + (val || 0), 0);
         
-        // Determine status class
-        let statusClass = 'status-clean';
-        if (malicious > 5) statusClass = 'status-malicious';
-        else if (malicious > 0) statusClass = 'status-suspicious';
+        // Format detection with colored number
+        const color = malicious > 0 ? 'var(--red)' : 'var(--green)';
+        const detectionHtml = `<span style="color: ${color}">${malicious}</span> / ${total}`;
         
         // Format tags (limit to first 5)
         const tags = attrs.tags || [];
@@ -1963,12 +2571,12 @@ function renderRelatedUrlsTable(urls) {
             <div class="relation-row">
                 <div class="relation-main">
                     <div class="relation-url">
-                        <a href="result.html?type=url&id=${encodeURIComponent(urlObj.id)}">${escapeHtml(attrs.url || urlObj.id)}</a>
+                        <a href="result.html?type=url&id=${urlObj.id}">${escapeHtml(attrs.url || urlObj.id)}</a>
                     </div>
                     ${displayTags || moreTags ? `<div class="relation-tags">${displayTags}${moreTags}</div>` : ''}
                 </div>
                 <div class="relation-meta">
-                    <span class="relation-detections ${statusClass}">${malicious} / ${total}</span>
+                    <span class="relation-detections">${detectionHtml}</span>
                     <span class="relation-date">${date}</span>
                 </div>
             </div>
@@ -2023,10 +2631,9 @@ function renderEmbeddedJsFilesTable(files) {
         const malicious = stats.malicious || 0;
         const total = Object.values(stats).reduce((sum, val) => sum + (val || 0), 0);
         
-        // Determine status class
-        let statusClass = 'status-clean';
-        if (malicious > 3) statusClass = 'status-malicious';
-        else if (malicious > 0) statusClass = 'status-suspicious';
+        // Format detection with colored number
+        const color = malicious > 0 ? 'var(--red)' : 'var(--green)';
+        const detectionHtml = `<span style="color: ${color}">${malicious}</span> / ${total}`;
         
         // Get filename
         const filename = attrs.meaningful_name || context.filename || attrs.names?.[0] || 'Unknown';
@@ -2054,7 +2661,7 @@ function renderEmbeddedJsFilesTable(files) {
                     ${displayTags || moreTags ? `<div class="relation-tags">${displayTags}${moreTags}</div>` : ''}
                 </div>
                 <div class="relation-meta">
-                    <span class="relation-detections ${statusClass}">${malicious} / ${total}</span>
+                    <span class="relation-detections">${detectionHtml}</span>
                     <span class="relation-type">${escapeHtml(attrs.type_description || 'JavaScript')}${sizeText ? ' • ' + sizeText : ''}</span>
                     <span class="relation-date">${date}</span>
                 </div>
@@ -2078,14 +2685,15 @@ function renderFilesTable(files, showDownloadContext = false) {
         const malicious = stats.malicious || 0;
         const total = Object.values(stats).reduce((sum, val) => sum + (val || 0), 0);
         
-        // Determine status class and risk level
-        let statusClass = 'status-clean';
+        // Format detection with colored number
+        const color = malicious > 0 ? 'var(--red)' : 'var(--green)';
+        const detectionHtml = `<span style="color: ${color}">${malicious}</span> / ${total}`;
+        
+        // Determine risk level icon
         let riskIcon = '📄';
         if (malicious > 20) {
-            statusClass = 'status-malicious';
             riskIcon = '🚨';
         } else if (malicious > 5) {
-            statusClass = 'status-suspicious';
             riskIcon = '⚠️';
         }
         
@@ -2131,7 +2739,7 @@ function renderFilesTable(files, showDownloadContext = false) {
                     ${contextInfo}
                 </div>
                 <div class="relation-meta">
-                    <span class="relation-detections ${statusClass}">${malicious} / ${total}</span>
+                    <span class="relation-detections">${detectionHtml}</span>
                     <span class="relation-type">${escapeHtml(typeText)}${sizeText ? ' • ' + sizeText : ''}</span>
                 </div>
             </div>
@@ -2158,10 +2766,9 @@ function renderContactedDomainsTable(domains, totalCount) {
         const malicious = stats.malicious || 0;
         const total = Object.values(stats).reduce((sum, val) => sum + (val || 0), 0);
         
-        // Determine status class
-        let statusClass = 'status-clean';
-        if (malicious > 5) statusClass = 'status-malicious';
-        else if (malicious > 0) statusClass = 'status-suspicious';
+        // Format detection with colored number
+        const color = malicious > 0 ? 'var(--red)' : 'var(--green)';
+        const detectionHtml = `<span style="color: ${color}">${malicious}</span> / ${total}`;
         
         // Format creation date
         const creationDate = attrs.creation_date ? 
@@ -2179,7 +2786,7 @@ function renderContactedDomainsTable(domains, totalCount) {
                     </a>
                 </td>
                 <td>
-                    <span class="detections ${statusClass}">${malicious} / ${total}</span>
+                    <span class="detections">${detectionHtml}</span>
                 </td>
                 <td>${escapeHtml(creationDate)}</td>
                 <td title="${escapeHtml(registrar)}">${escapeHtml(registrar.length > 30 ? registrar.substring(0, 30) + '...' : registrar)}</td>
@@ -2228,10 +2835,9 @@ function renderContactedIpsTable(ips, totalCount) {
         const malicious = stats.malicious || 0;
         const total = Object.values(stats).reduce((sum, val) => sum + (val || 0), 0);
         
-        // Determine status class
-        let statusClass = 'status-clean';
-        if (malicious > 5) statusClass = 'status-malicious';
-        else if (malicious > 0) statusClass = 'status-suspicious';
+        // Format detection with colored number
+        const color = malicious > 0 ? 'var(--red)' : 'var(--green)';
+        const detectionHtml = `<span style="color: ${color}">${malicious}</span> / ${total}`;
         
         // Get ASN
         const asn = attrs.asn || '-';
@@ -2254,7 +2860,7 @@ function renderContactedIpsTable(ips, totalCount) {
                     </a>
                 </td>
                 <td>
-                    <span class="detections ${statusClass}">${malicious} / ${total}</span>
+                    <span class="detections">${detectionHtml}</span>
                 </td>
                 <td title="${escapeHtml(asnTooltip)}">${asnDisplay}</td>
                 <td title="${escapeHtml(countryTooltip)}">${countryDisplay}</td>
@@ -2319,14 +2925,16 @@ function renderContentTab() {
 }
 
 /**
- * Render telemetry tab content (URLs only)
+ * Render telemetry tab content (URLs and Files)
  */
 function renderTelemetryTab() {
-    if (currentType !== 'url') {
-        return createEmptyState('Telemetry is only available for URLs');
+    if (currentType !== 'url' && currentType !== 'file' && currentType !== 'hash') {
+        return createEmptyState('Telemetry is only available for URLs and Files');
     }
     
     const attrs = currentData.attributes;
+    const isFile = currentType === 'file' || currentType === 'hash';
+    const entityLabel = isFile ? 'file' : 'URL';
     
     // Summary cards
     const firstSeenDate = attrs.first_submission_date ? 
@@ -2344,7 +2952,7 @@ function renderTelemetryTab() {
             <div class="telemetry-card">
                 <div class="telemetry-label">
                     First seen
-                    <span class="info-icon" title="Date when this URL was first submitted to VirusTotal">ℹ️</span>
+                    <span class="info-icon" title="Date when this ${entityLabel} was first submitted to VirusTotal">ℹ️</span>
                 </div>
                 <div class="telemetry-value">${escapeHtml(firstSeenDate)}</div>
                 <div class="telemetry-meta" id="first-seen-region"></div>
@@ -2352,7 +2960,7 @@ function renderTelemetryTab() {
             <div class="telemetry-card">
                 <div class="telemetry-label">
                     Last seen
-                    <span class="info-icon" title="Date when this URL was most recently submitted">ℹ️</span>
+                    <span class="info-icon" title="Date when this ${entityLabel} was most recently submitted">ℹ️</span>
                 </div>
                 <div class="telemetry-value">${escapeHtml(lastSeenDate)}</div>
                 <div class="telemetry-meta" id="last-seen-region"></div>
@@ -2360,7 +2968,7 @@ function renderTelemetryTab() {
             <div class="telemetry-card">
                 <div class="telemetry-label">
                     Total submissions
-                    <span class="info-icon" title="Number of times this URL was submitted for analysis">ℹ️</span>
+                    <span class="info-icon" title="Number of times this ${entityLabel} was submitted for analysis">ℹ️</span>
                 </div>
                 <div class="telemetry-value">${totalSubmissions}</div>
             </div>
@@ -2372,7 +2980,7 @@ function renderTelemetryTab() {
             </div>
             <div class="card-body">
                 <div id="submissions-content">
-                    <p class="text-muted" style="margin-bottom: 1rem;">Uploads of this file being studied. Reanalysis requests do not generate a submission.</p>
+                    <p class="text-muted" style="margin-bottom: 1rem;">Uploads of this ${entityLabel} being studied. Reanalysis requests do not generate a submission.</p>
                     <button class="btn-secondary" onclick="loadSubmissionsData()">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M12 5v14M5 12l7 7 7-7"></path>
@@ -3204,89 +3812,1008 @@ window.loadBehaviorData = async function() {
     container.innerHTML = '<div class="loading-placeholder"><div class="loading-spinner"></div><p class="text-muted">Loading behavior data...</p></div>';
     
     try {
-        const behaviorData = await vtClient.getFileBehaviorSummary(currentId);
+        // Fetch full behavior reports from all sandboxes
+        const behaviorData = await vtClient.getFileBehaviors(currentId);
+        
+        if (!behaviorData.data || behaviorData.data.length === 0) {
+            container.innerHTML = createEmptyState('No behavior data available');
+            return;
+        }
+        
         container.innerHTML = renderBehaviorContent(behaviorData.data);
     } catch (error) {
-        console.error('Error loading behavior:', error);
-        container.innerHTML = `<div class="empty-state"><p class="text-muted">${error.message}</p></div>`;
+        console.error('Error loading behavior:', error.message || error);
+        const errorMsg = error.message || 'Failed to load behavior data';
+        container.innerHTML = `
+            <div class="empty-state">
+                <p class="text-muted">${escapeHtml(errorMsg)}</p>
+                <button class="btn-secondary" onclick="loadBehaviorData()" style="margin-top: 1rem;">Retry</button>
+            </div>
+        `;
     }
 };
 
+// Global data store for "show more" functionality
+window.behaviorDataStore = window.behaviorDataStore || {};
+
 /**
- * Render behavior content
+ * Create a collapsible section with unique ID
  */
-function renderBehaviorContent(behavior) {
-    if (!behavior || !behavior.attributes) {
+function createCollapsibleSection(title, content, sectionId, expanded = false) {
+    return `
+        <details class="expandable-section" ${expanded ? 'open' : ''} style="margin-bottom: var(--spacing-lg); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+            <summary style="cursor: pointer; padding: var(--spacing-md); background: var(--bg-secondary); font-weight: 600; font-size: 0.95rem; list-style: none; display: flex; align-items: center; gap: var(--spacing-sm); user-select: none; border-radius: var(--radius-md);">
+                <span style="font-size: 0.7rem; color: var(--text-secondary);">▶</span>
+                <span>${escapeHtml(title)}</span>
+            </summary>
+            <div class="section-content" style="padding: var(--spacing-md); background: var(--bg-primary); border-top: 1px solid var(--border-color); min-height: 50px;">
+                ${content}
+            </div>
+        </details>
+    `;
+}
+
+/**
+ * Create subsection header with consistent styling
+ */
+function createSubsectionHeader(title) {
+    return `<h5 style="color: var(--text-primary); margin-bottom: var(--spacing-sm); font-weight: 600; font-size: 0.9rem; border-bottom: 1px solid var(--border-color); padding-bottom: var(--spacing-xs);">${escapeHtml(title)}</h5>`;
+}
+
+/**
+ * Render behavior content from multiple sandbox reports
+ */
+function renderBehaviorContent(behaviors) {
+    if (!behaviors || behaviors.length === 0) {
         return createEmptyState('No behavior data available');
     }
     
-    const attrs = behavior.attributes;
+    // Clear previous data
+    window.behaviorDataStore = {};
     
-    // Summary stats
-    const stats = `
-        <div class="behavior-summary">
-            <div class="behavior-stat">
-                <div class="behavior-stat-value">${formatNumber(attrs.dns_lookups?.length || 0)}</div>
-                <div class="behavior-stat-label">DNS Lookups</div>
-            </div>
-            <div class="behavior-stat">
-                <div class="behavior-stat-value">${formatNumber(attrs.http_conversations?.length || 0)}</div>
-                <div class="behavior-stat-label">HTTP Requests</div>
-            </div>
-            <div class="behavior-stat">
-                <div class="behavior-stat-value">${formatNumber(attrs.files_written?.length || 0)}</div>
-                <div class="behavior-stat-label">Files Written</div>
-            </div>
-            <div class="behavior-stat">
-                <div class="behavior-stat-value">${formatNumber(attrs.processes_created?.length || 0)}</div>
-                <div class="behavior-stat-label">Processes</div>
+    // Generate summary cards
+    const summaryCards = renderSandboxSummaryCards(behaviors);
+    
+    // Render each sandbox report
+    const sandboxReports = behaviors.map(behavior => renderSingleBehaviorReport(behavior)).join('');
+    
+    return `
+        <div class="behavior-content">
+            ${summaryCards}
+            <div class="behavior-reports" style="margin-top: var(--spacing-xl);">
+                ${sandboxReports}
             </div>
         </div>
     `;
-    
-    // DNS lookups
-    let dnsSection = '';
-    if (attrs.dns_lookups && attrs.dns_lookups.length > 0) {
-        const dnsList = attrs.dns_lookups.map(dns => 
-            `<li><strong>${escapeHtml(dns.hostname)}</strong> → ${escapeHtml(dns.resolved_ips?.join(', ') || 'N/A')}</li>`
+}
+
+/**
+ * Render summary cards for all sandboxes
+ */
+function renderSandboxSummaryCards(behaviors) {
+    const cards = behaviors.map(behavior => {
+        const attrs = behavior.attributes;
+        const sandboxName = attrs.sandbox_name || 'Unknown Sandbox';
+        const sandboxId = behavior.id || Math.random().toString(36);
+        
+        // Get verdict/malware info
+        const verdictLabels = attrs.verdict_labels || [];
+        const tags = attrs.tags || [];
+        
+        // Only show malicious badge if there are threats detected
+        const hasVerdicts = verdictLabels.length > 0;
+        const verdictBadge = hasVerdicts 
+            ? `<span class="status-malicious" style="padding: 0.25rem 0.75rem; border-radius: var(--radius-sm); font-size: 0.75rem; font-weight: 600;">malicious</span>`
+            : '';
+        
+        // Create malware badges
+        const malwareBadges = verdictLabels.map(label => 
+            `<span class="sandbox-tag" style="background: rgba(239, 68, 68, 0.1); color: var(--error-color); padding: 0.25rem 0.5rem; border-radius: var(--radius-sm); font-size: 0.75rem; font-weight: 600;">${escapeHtml(label)}</span>`
         ).join('');
-        dnsSection = createExpandableSection('DNS Lookups', `<ul class="simple-list">${dnsList}</ul>`);
+        
+        // Create classification tags (first 3 tags only for compact display)
+        const classificationTags = tags.slice(0, 3).map(tag => 
+            `<span class="sandbox-tag" style="background: var(--bg-tertiary); color: var(--text-secondary); padding: 0.25rem 0.5rem; border-radius: var(--radius-sm); font-size: 0.7rem; font-weight: 600;">${escapeHtml(tag)}</span>`
+        ).join('');
+        
+        return `
+            <div class="sandbox-card" onclick="document.getElementById('sandbox-${sandboxId}').scrollIntoView({behavior: 'smooth', block: 'start'})" 
+                 style="cursor: pointer; padding: var(--spacing-md); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); transition: all 0.2s ease;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-sm);">
+                    <span style="font-weight: 700; font-size: 1.05rem; color: var(--text-primary);">${escapeHtml(sandboxName)}</span>
+                    ${verdictBadge}
+                </div>
+                ${malwareBadges ? `<div style="margin-bottom: var(--spacing-xs); display: flex; gap: var(--spacing-xs); flex-wrap: wrap;">${malwareBadges}</div>` : ''}
+                ${classificationTags ? `<div style="display: flex; gap: var(--spacing-xs); flex-wrap: wrap;">${classificationTags}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+    
+    return `
+        <div class="sandbox-summary-cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--spacing-md); margin-bottom: var(--spacing-lg);">
+            ${cards}
+        </div>
+    `;
+}
+
+/**
+ * Render a single behavior report from one sandbox
+ */
+function renderSingleBehaviorReport(behavior) {
+    const attrs = behavior.attributes;
+    const sandboxName = attrs.sandbox_name || 'Unknown Sandbox';
+    const sandboxId = behavior.id || Math.random().toString(36);
+    
+    // Verdict labels - Malware family names
+    let verdictSection = '';
+    if (attrs.verdict_labels && attrs.verdict_labels.length > 0) {
+        const verdictBadges = attrs.verdict_labels.map(label => 
+            `<span class="badge badge-malicious" style="font-size: 0.9rem; padding: 4px 10px;">${escapeHtml(label)}</span>`
+        ).join(' ');
+        verdictSection = `
+            <div style="margin-bottom: var(--spacing-md); background: var(--bg-secondary); padding: var(--spacing-md); border-radius: var(--radius-md); border-left: 3px solid var(--danger-color);">
+                <div style="font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); margin-bottom: var(--spacing-xs); text-transform: uppercase;">Detected Threats</div>
+                <div style="display: flex; gap: var(--spacing-xs); flex-wrap: wrap;">${verdictBadges}</div>
+            </div>`;
     }
     
-    // HTTP requests
-    let httpSection = '';
-    if (attrs.http_conversations && attrs.http_conversations.length > 0) {
-        const httpList = attrs.http_conversations.map(http => 
-            `<li><strong>${escapeHtml(http.request_method || 'GET')}</strong> ${escapeHtml(http.url)}</li>`
-        ).join('');
-        httpSection = createExpandableSection('HTTP Requests', `<ul class="simple-list">${httpList}</ul>`);
+    // Process Tree
+    let processTreeSection = '';
+    if (attrs.processes_tree && attrs.processes_tree.length > 0) {
+        const processTreeHtml = renderProcessTree(attrs.processes_tree);
+        processTreeSection = createCollapsibleSection(
+            `Process Tree (${attrs.processes_tree.length})`,
+            `<div class="process-tree" style="padding: var(--spacing-xs);">${processTreeHtml}</div>`,
+            `process-tree-${sandboxId}`,
+            true
+        );
     }
     
-    // Files written
+    // MITRE ATT&CK Techniques
+    let mitreSection = '';
+    if (attrs.mitre_attack_techniques && attrs.mitre_attack_techniques.length > 0) {
+        const mitreHtml = renderMitreTechniques(attrs.mitre_attack_techniques);
+        mitreSection = createCollapsibleSection(
+            `MITRE ATT&CK Techniques (${attrs.mitre_attack_techniques.length})`,
+            mitreHtml,
+            `mitre-${sandboxId}`,
+            false
+        );
+    }
+    
+    // MBC (Malware Behavior Catalog)
+    let mbcSection = '';
+    if (attrs.mbc && attrs.mbc.length > 0) {
+        // Filter out entries that only have IDs without actual data
+        const validMbc = attrs.mbc.filter(mbc => 
+            (mbc.objective && mbc.objective.trim()) || 
+            (mbc.behavior && mbc.behavior.trim()) || 
+            (mbc.method && mbc.method.trim())
+        );
+        
+        if (validMbc.length > 0) {
+            const mbcHtml = renderMbcTechniques(validMbc);
+            mbcSection = createCollapsibleSection(
+                `MBC (Malware Behavior Catalog) (${validMbc.length})`,
+                mbcHtml,
+                `mbc-${sandboxId}`,
+                false
+            );
+        }
+    }
+    
+    // Network Activity
+    let networkSection = '';
+    const hasNetworkActivity = 
+        (attrs.http_conversations && attrs.http_conversations.length > 0) ||
+        (attrs.dns_lookups && attrs.dns_lookups.length > 0) ||
+        (attrs.ip_traffic && attrs.ip_traffic.length > 0) ||
+        (attrs.memory_pattern_urls && attrs.memory_pattern_urls.length > 0) ||
+        (attrs.memory_pattern_ips && attrs.memory_pattern_ips.length > 0);
+    
+    if (hasNetworkActivity) {
+        networkSection = renderNetworkActivity(attrs, sandboxId);
+    }
+    
+    // Files Activity
     let filesSection = '';
-    if (attrs.files_written && attrs.files_written.length > 0) {
-        filesSection = createExpandableSection('Files Written', createList(attrs.files_written, 20));
+    const hasFilesActivity = 
+        (attrs.files_written && attrs.files_written.length > 0) ||
+        (attrs.files_opened && attrs.files_opened.length > 0) ||
+        (attrs.files_deleted && attrs.files_deleted.length > 0) ||
+        (attrs.files_dropped && attrs.files_dropped.length > 0);
+    
+    if (hasFilesActivity) {
+        filesSection = renderFilesActivity(attrs, sandboxId);
     }
     
-    // Processes
-    let processSection = '';
-    if (attrs.processes_created && attrs.processes_created.length > 0) {
-        processSection = createExpandableSection('Processes Created', createList(attrs.processes_created, 20));
+    // Registry Activity
+    let registrySection = '';
+    const hasRegistryActivity = 
+        (attrs.registry_keys_opened && attrs.registry_keys_opened.length > 0) ||
+        (attrs.registry_keys_set && attrs.registry_keys_set.length > 0) ||
+        (attrs.registry_keys_deleted && attrs.registry_keys_deleted.length > 0);
+    
+    if (hasRegistryActivity) {
+        registrySection = renderRegistryActivity(attrs, sandboxId);
+    }
+    
+    // Tags - Behavior characteristics
+    let tagsSection = '';
+    if (attrs.tags && attrs.tags.length > 0) {
+        const tagBadges = attrs.tags.map(tag => {
+            // Determine badge color based on tag type
+            let badgeClass = 'badge-info';
+            const tagLower = tag.toLowerCase();
+            
+            if (tagLower.includes('detect') || tagLower.includes('evasion') || tagLower.includes('anti')) {
+                badgeClass = 'badge-warning';
+            } else if (tagLower.includes('persistence') || tagLower.includes('privilege')) {
+                badgeClass = 'badge-malicious';
+            } else if (tagLower.includes('obfuscate') || tagLower.includes('packed')) {
+                badgeClass = 'badge-secondary';
+            }
+            
+            return `<span class="badge ${badgeClass}" style="font-size: 0.75rem; padding: 3px 8px;">${escapeHtml(tag)}</span>`;
+        }).join(' ');
+        
+        tagsSection = `
+            <div style="margin-bottom: var(--spacing-md); background: var(--bg-secondary); padding: var(--spacing-md); border-radius: var(--radius-md); border-left: 3px solid var(--info-color);">
+                <div style="font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); margin-bottom: var(--spacing-xs); text-transform: uppercase;">Behavior Characteristics</div>
+                <div style="display: flex; gap: var(--spacing-xs); flex-wrap: wrap;">${tagBadges}</div>
+            </div>`;
     }
     
     return `
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">Behavior Summary</h3>
+        <details id="sandbox-${sandboxId}" class="sandbox-report" style="margin-bottom: var(--spacing-xl); border: 2px solid var(--border-color); border-radius: var(--radius-lg); box-shadow: 0 2px 4px rgba(0,0,0,0.1); scroll-margin-top: var(--spacing-lg);" open>
+            <summary style="cursor: pointer; user-select: none; padding: var(--spacing-md); background: var(--bg-tertiary); display: flex; align-items: center; gap: var(--spacing-sm); list-style: none; border-radius: var(--radius-lg);">
+                <span style="font-size: 1rem; color: var(--text-secondary);">▼</span>
+                <h3 style="margin: 0; font-size: 1.1rem; font-weight: 700;">${escapeHtml(sandboxName)}</h3>
+            </summary>
+            <div style="padding: var(--spacing-lg); background: var(--bg-primary); border-top: 2px solid var(--border-color);">
+                ${verdictSection}
+                ${tagsSection}
+                ${processTreeSection}
+                ${mitreSection}
+                ${mbcSection}
+                ${networkSection}
+                ${filesSection}
+                ${registrySection}
             </div>
-            <div class="card-body">${stats}</div>
-        </div>
-        ${dnsSection}
-        ${httpSection}
-        ${filesSection}
-        ${processSection}
+        </details>
     `;
 }
+
+/**
+ * Render process tree with improved visual hierarchy and collapsible nodes
+ */
+function renderProcessTree(processes, level = 0, isLast = true) {
+    return processes.map((proc, index) => {
+        const isLastItem = index === processes.length - 1;
+        const indent = level === 0 ? 0 : 16; // No indent for root, 16px for all children
+        const hasChildren = proc.children && proc.children.length > 0;
+        const childrenHtml = hasChildren ? renderProcessTree(proc.children, level + 1, isLastItem) : '';
+        
+        // Determine icon and color based on file extension and type
+        let icon = '⚙️';
+        let iconColor = 'var(--text-secondary)';
+        const name = proc.name || 'Unknown';
+        
+        if (name.endsWith('.exe')) {
+            icon = '🔧';
+            iconColor = '#ff6b6b';
+        } else if (name.endsWith('.dll')) {
+            icon = '📦';
+            iconColor = '#4ecdc4';
+        } else if (name.endsWith('.bat') || name.endsWith('.cmd')) {
+            icon = '📜';
+            iconColor = '#ffe66d';
+        } else if (name.endsWith('.ps1')) {
+            icon = '⚡';
+            iconColor = '#95e1d3';
+        } else if (hasChildren) {
+            icon = '📂';
+            iconColor = '#ffd93d';
+        }
+        
+        // Truncate command line if too long
+        let commandLine = '';
+        if (proc.command_line) {
+            const cmd = proc.command_line;
+            const maxLen = 80;
+            commandLine = cmd.length > maxLen ? cmd.substring(0, maxLen) + '...' : cmd;
+        }
+        
+        // If has children, make it collapsible
+        if (hasChildren) {
+            return `
+                <details class="process-node" style="margin-bottom: 2px; margin-left: ${indent}px;" open>
+                    <summary style="list-style: none; cursor: pointer; font-family: 'Courier New', monospace; font-size: 0.85rem;">
+                        <div style="display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border-radius: 4px; background: var(--bg-secondary); border-left: 2px solid ${iconColor};">
+                            <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
+                                <span class="process-toggle" style="font-size: 0.7rem; color: var(--text-secondary); flex-shrink: 0;">▼</span>
+                                <span style="font-size: 1rem; flex-shrink: 0;" title="Parent Process">${icon}</span>
+                                <div style="min-width: 0; flex: 1;">
+                                    <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                                        <code style="font-weight: 600; color: ${iconColor}; word-break: break-all;">${escapeHtml(name)}</code>
+                                        ${proc.process_id ? `<span class="badge badge-info" style="font-size: 0.7rem; padding: 2px 6px;">PID ${escapeHtml(proc.process_id)}</span>` : ''}
+                                        <span class="badge badge-secondary" style="font-size: 0.7rem; padding: 2px 6px;">${proc.children.length} child${proc.children.length > 1 ? 'ren' : ''}</span>
+                                    </div>
+                                    ${commandLine ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; font-style: italic; word-break: break-all;" title="${escapeHtml(proc.command_line || '')}">${escapeHtml(commandLine)}</div>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </summary>
+                    <div class="process-children" style="margin-top: 2px;">
+                        ${childrenHtml}
+                    </div>
+                </details>
+            `;
+        } else {
+            // Leaf node without children
+            return `
+                <div class="process-item" style="margin-bottom: 2px; margin-left: ${indent}px; font-family: 'Courier New', monospace; font-size: 0.85rem;">
+                    <div style="display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border-radius: 4px; background: var(--bg-secondary); border-left: 2px solid ${iconColor};">
+                        <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;">
+                            <span style="font-size: 1rem; flex-shrink: 0; margin-left: 14px;" title="Child Process">${icon}</span>
+                            <div style="min-width: 0; flex: 1;">
+                                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                                    <code style="font-weight: 600; color: ${iconColor}; word-break: break-all;">${escapeHtml(name)}</code>
+                                    ${proc.process_id ? `<span class="badge badge-info" style="font-size: 0.7rem; padding: 2px 6px;">PID ${escapeHtml(proc.process_id)}</span>` : ''}
+                                </div>
+                                ${commandLine ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; font-style: italic; word-break: break-all;" title="${escapeHtml(proc.command_line || '')}">${escapeHtml(commandLine)}</div>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    }).join('');
+}
+
+/**
+ * Render MITRE ATT&CK techniques
+ */
+function renderMitreTechniques(techniques) {
+    const grouped = {};
+    techniques.forEach(tech => {
+        if (!grouped[tech.id]) {
+            grouped[tech.id] = tech;
+        }
+    });
+    
+    const rows = Object.values(grouped).map(tech => {
+        const severityClass = getSeverityClass(tech.severity);
+        const description = tech.signature_description || '';
+        return `
+            <tr>
+                <td style="white-space: nowrap;">
+                    <a href="https://attack.mitre.org/techniques/${tech.id.replace('.', '/')}" 
+                       target="_blank" 
+                       class="link">
+                        <code style="font-size: 0.85rem;">${escapeHtml(tech.id)}</code>
+                    </a>
+                </td>
+                <td style="max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(description)}">${escapeHtml(description)}</td>
+                <td style="white-space: nowrap;"><span class="badge ${severityClass}">${formatSeverity(tech.severity)}</span></td>
+            </tr>
+        `;
+    }).join('');
+    
+    return `
+        <div class="table-responsive">
+            <table class="table contacted-table" style="table-layout: auto; width: 100%;">
+                <thead>
+                    <tr>
+                        <th style="white-space: nowrap;">Technique ID</th>
+                        <th style="width: 100%;">Description</th>
+                        <th style="white-space: nowrap;">Severity</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+/**
+ * Render MBC techniques
+ */
+function renderMbcTechniques(mbcList) {
+    const rows = mbcList.map(mbc => {
+        const objective = mbc.objective || '';
+        const behavior = mbc.behavior || '';
+        const method = mbc.method || '';
+        const truncatedObjective = objective.length > 40 ? objective.substring(0, 40) + '...' : objective;
+        const truncatedBehavior = behavior.length > 50 ? behavior.substring(0, 50) + '...' : behavior;
+        const truncatedMethod = method.length > 40 ? method.substring(0, 40) + '...' : method;
+        return `
+            <tr>
+                <td style="width: 100px;"><code style="font-size: 0.85rem;">${escapeHtml(mbc.id || '')}</code></td>
+                <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(objective)}">${escapeHtml(truncatedObjective)}</td>
+                <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(behavior)}">${escapeHtml(truncatedBehavior)}</td>
+                <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(method)}">${escapeHtml(truncatedMethod)}</td>
+            </tr>
+        `;
+    }).join('');
+    
+    return `
+        <div class="table-responsive">
+            <table class="table contacted-table" style="table-layout: fixed;">
+                <thead>
+                    <tr>
+                        <th style="width: 100px;">ID</th>
+                        <th style="width: 25%;">Objective</th>
+                        <th style="width: 40%;">Behavior</th>
+                        <th style="width: 25%;">Method</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+/**
+ * Render network activity section
+ */
+function renderNetworkActivity(attrs, sandboxId) {
+    let sections = [];
+    const LIMIT = 20;
+    
+    // Memory pattern URLs and IPs (extracted from memory)
+    if (attrs.memory_pattern_urls && attrs.memory_pattern_urls.length > 0) {
+        const items = attrs.memory_pattern_urls;
+        const dataKey = `urls-${sandboxId}`;
+        window.behaviorDataStore[dataKey] = items.slice(LIMIT);
+        
+        const urlList = items.slice(0, LIMIT).filter(url => url).map(url => 
+            `<li><a href="${generateEntityUrl(url, 'url')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(url)}</code></a></li>`
+        ).join('');
+        const showMoreBtn = items.length > LIMIT ? 
+            `<button class="btn-secondary btn-sm" onclick="expandList(this, '${dataKey}', 'url')" style="margin-top: var(--spacing-sm);">Show ${items.length - LIMIT} more...</button>` : '';
+        sections.push(`
+            <div style="margin-bottom: var(--spacing-lg);">
+                ${createSubsectionHeader(`URLs from Memory (${items.length})`)}
+                <ul class="simple-list">${urlList}</ul>
+                ${showMoreBtn}
+            </div>
+        `);
+    }
+    
+    if (attrs.memory_pattern_ips && attrs.memory_pattern_ips.length > 0) {
+        const items = attrs.memory_pattern_ips;
+        const dataKey = `ips-${sandboxId}`;
+        window.behaviorDataStore[dataKey] = items.slice(LIMIT);
+        
+        const ipList = items.slice(0, LIMIT).filter(ip => ip).map(ip => 
+            `<li><a href="${generateEntityUrl(ip, 'ip')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(ip)}</code></a></li>`
+        ).join('');
+        const showMoreBtn = items.length > LIMIT ?
+            `<button class="btn-secondary btn-sm" onclick="expandList(this, '${dataKey}', 'ip')" style="margin-top: var(--spacing-sm);">Show ${items.length - LIMIT} more...</button>` : '';
+        sections.push(`
+            <div style="margin-bottom: var(--spacing-lg);">
+                ${createSubsectionHeader(`IPs from Memory (${items.length})`)}
+                <ul class="simple-list">${ipList}</ul>
+                ${showMoreBtn}
+            </div>
+        `);
+    }
+    
+    // HTTP Conversations
+    if (attrs.http_conversations && attrs.http_conversations.length > 0) {
+        const items = attrs.http_conversations;
+        const contentId = `http-${sandboxId}`;
+        const dataKey = contentId + '-data';
+        window.behaviorDataStore[dataKey] = items.slice(LIMIT);
+        
+        const httpRows = items.slice(0, LIMIT).map(http => {
+            const url = http.url || '';
+            const truncatedUrl = url.length > 80 ? url.substring(0, 80) + '...' : url;
+            const urlCell = url
+                ? `<a href="${generateEntityUrl(url, 'url')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(truncatedUrl)}</code></a>`
+                : '<span class="text-muted">-</span>';
+            
+            return `
+            <tr>
+                <td style="width: 80px;"><span class="badge badge-info">${escapeHtml(http.request_method || 'GET')}</span></td>
+                <td style="max-width: 600px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(url)}">
+                    ${urlCell}
+                </td>
+                <td style="width: 80px;">${http.response_status_code || 'N/A'}</td>
+            </tr>
+            `;
+        }).join('');
+        
+        sections.push(`
+            <div style="margin-bottom: var(--spacing-lg);">
+                ${createSubsectionHeader(`HTTP Requests (${items.length})`)}
+                <div class="table-responsive">
+                    <table class="table contacted-table" style="table-layout: fixed;">
+                        <thead>
+                            <tr>
+                                <th style="width: 80px;">Method</th>
+                                <th>URL</th>
+                                <th style="width: 80px;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="${contentId}">${httpRows}</tbody>
+                    </table>
+                </div>
+                ${items.length > LIMIT ? `<button class="btn-secondary btn-sm" onclick="showAllTableRows('${contentId}', '${dataKey}', 'http')" style="margin-top: var(--spacing-sm);">Show ${items.length - LIMIT} more...</button>` : ''}
+            </div>
+        `);
+    }
+    
+    // DNS Lookups
+    if (attrs.dns_lookups && attrs.dns_lookups.length > 0) {
+        const items = attrs.dns_lookups;
+        const contentId = `dns-${sandboxId}`;
+        const dataKey = contentId + '-data';
+        window.behaviorDataStore[dataKey] = items.slice(LIMIT);
+        
+        const dnsRows = items.slice(0, LIMIT).map(dns => {
+            const hostname = dns.hostname || '';
+            const hostnameCell = hostname 
+                ? `<a href="${generateEntityUrl(hostname, 'domain')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(hostname)}</code></a>`
+                : '<span class="text-muted">-</span>';
+            
+            const resolvedIpsCell = dns.resolved_ips && dns.resolved_ips.length > 0
+                ? dns.resolved_ips.filter(ip => ip).map(ip => `<a href="${generateEntityUrl(ip, 'ip')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(ip)}</code></a>`).join(', ')
+                : '<span class="text-muted">N/A</span>';
+            
+            return `
+            <tr>
+                <td>${hostnameCell}</td>
+                <td>${resolvedIpsCell}</td>
+            </tr>
+            `;
+        }).join('');
+        
+        sections.push(`
+            <div style="margin-bottom: var(--spacing-lg);">
+                ${createSubsectionHeader(`DNS Lookups (${items.length})`)}
+                <div class="table-responsive">
+                    <table class="table contacted-table">
+                        <thead>
+                            <tr>
+                                <th>Hostname</th>
+                                <th>Resolved IPs</th>
+                            </tr>
+                        </thead>
+                        <tbody id="${contentId}">${dnsRows}</tbody>
+                    </table>
+                </div>
+                ${items.length > LIMIT ? `<button class="btn-secondary btn-sm" onclick="showAllTableRows('${contentId}', '${dataKey}', 'dns')" style="margin-top: var(--spacing-sm);">Show ${items.length - LIMIT} more...</button>` : ''}
+            </div>
+        `);
+    }
+    
+    // IP Traffic
+    if (attrs.ip_traffic && attrs.ip_traffic.length > 0) {
+        const items = attrs.ip_traffic;
+        const contentId = `ip-traffic-${sandboxId}`;
+        const dataKey = contentId + '-data';
+        window.behaviorDataStore[dataKey] = items.slice(LIMIT);
+        
+        const ipRows = items.slice(0, LIMIT).map(traffic => {
+            const destIp = traffic.destination_ip || '';
+            const ipCell = destIp
+                ? `<a href="${generateEntityUrl(destIp, 'ip')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(destIp)}</code></a>`
+                : '<span class="text-muted">-</span>';
+            
+            return `
+            <tr>
+                <td>${ipCell}</td>
+                <td><code style="font-size: 0.85rem;">${escapeHtml(traffic.destination_port || '')}</code></td>
+                <td><code style="font-size: 0.85rem;">${escapeHtml(traffic.transport_layer_protocol || '')}</code></td>
+            </tr>
+            `;
+        }).join('');
+        
+        sections.push(`
+            <div style="margin-bottom: var(--spacing-lg);">
+                ${createSubsectionHeader(`IP Traffic (${items.length})`)}
+                <div class="table-responsive">
+                    <table class="table contacted-table">
+                        <thead>
+                            <tr>
+                                <th>Destination IP</th>
+                                <th>Port</th>
+                                <th>Protocol</th>
+                            </tr>
+                        </thead>
+                        <tbody id="${contentId}">${ipRows}</tbody>
+                    </table>
+                </div>
+                ${items.length > LIMIT ? `<button class="btn-secondary btn-sm" onclick="showAllTableRows('${contentId}', '${dataKey}', 'iptraffic')" style="margin-top: var(--spacing-sm);">Show ${items.length - LIMIT} more...</button>` : ''}
+            </div>
+        `);
+    }
+    
+    if (sections.length === 0) return '';
+    
+    return createCollapsibleSection(
+        'Network Activity',
+        sections.join(''),
+        `network-${sandboxId}`,
+        false
+    );
+}
+
+/**
+ * Render files activity section
+ */
+function renderFilesActivity(attrs, sandboxId) {
+    let sections = [];
+    const LIMIT = 20;
+    
+    if (attrs.files_written && attrs.files_written.length > 0) {
+        const items = attrs.files_written;
+        const dataKey = `files-written-${sandboxId}`;
+        window.behaviorDataStore[dataKey] = items.slice(LIMIT);
+        
+        const fileList = items.slice(0, LIMIT).map(file => 
+            `<li><code style="font-size: 0.85rem;">${escapeHtml(file)}</code></li>`
+        ).join('');
+        const showMoreBtn = items.length > LIMIT ?
+            `<button class="btn-secondary btn-sm" onclick="expandList(this, '${dataKey}', 'file')" style="margin-top: var(--spacing-sm);">Show ${items.length - LIMIT} more...</button>` : '';
+        sections.push(`
+            <div style="margin-bottom: var(--spacing-lg);">
+                ${createSubsectionHeader(`Files Written (${items.length})`)}
+                <ul class="simple-list" style="max-height: 300px; overflow-y: auto;">${fileList}</ul>
+                ${showMoreBtn}
+            </div>
+        `);
+    }
+    
+    if (attrs.files_opened && attrs.files_opened.length > 0) {
+        const items = attrs.files_opened;
+        const dataKey = `files-opened-${sandboxId}`;
+        window.behaviorDataStore[dataKey] = items.slice(LIMIT);
+        
+        const fileList = items.slice(0, LIMIT).map(file => 
+            `<li><code style="font-size: 0.85rem;">${escapeHtml(file)}</code></li>`
+        ).join('');
+        const showMoreBtn = items.length > LIMIT ?
+            `<button class="btn-secondary btn-sm" onclick="expandList(this, '${dataKey}', 'file')" style="margin-top: var(--spacing-sm);">Show ${items.length - LIMIT} more...</button>` : '';
+        sections.push(`
+            <div style="margin-bottom: var(--spacing-lg);">
+                ${createSubsectionHeader(`Files Opened (${items.length})`)}
+                <ul class="simple-list" style="max-height: 300px; overflow-y: auto;">${fileList}</ul>
+                ${showMoreBtn}
+            </div>
+        `);
+    }
+    
+    if (attrs.files_deleted && attrs.files_deleted.length > 0) {
+        const items = attrs.files_deleted;
+        const dataKey = `files-deleted-${sandboxId}`;
+        window.behaviorDataStore[dataKey] = items.slice(LIMIT);
+        
+        const fileList = items.slice(0, LIMIT).map(file => 
+            `<li><code style="font-size: 0.85rem;">${escapeHtml(file)}</code></li>`
+        ).join('');
+        const showMoreBtn = items.length > LIMIT ?
+            `<button class="btn-secondary btn-sm" onclick="expandList(this, '${dataKey}', 'file')" style="margin-top: var(--spacing-sm);">Show ${items.length - LIMIT} more...</button>` : '';
+        sections.push(`
+            <div style="margin-bottom: var(--spacing-lg);">
+                ${createSubsectionHeader(`Files Deleted (${items.length})`)}
+                <ul class="simple-list" style="max-height: 300px; overflow-y: auto;">${fileList}</ul>
+                ${showMoreBtn}
+            </div>
+        `);
+    }
+    
+    if (attrs.files_dropped && attrs.files_dropped.length > 0) {
+        const items = attrs.files_dropped;
+        const contentId = `files-dropped-${sandboxId}`;
+        const dataKey = contentId + '-data';
+        window.behaviorDataStore[dataKey] = items.slice(LIMIT);
+        
+        const fileRows = items.slice(0, LIMIT).map(file => {
+            const path = file.path || '';
+            const sha256 = file.sha256 || '';
+            const type = file.type || '';
+            
+            // Only create link if sha256 is not empty
+            const sha256Cell = sha256 
+                ? `<a href="${generateEntityUrl(sha256, 'hash')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(sha256)}</code></a>`
+                : '<span class="text-muted">-</span>';
+            
+            return `
+            <tr>
+                <td style="max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(path)}">
+                    <code style="font-size: 0.85rem;">${escapeHtml(path)}</code>
+                </td>
+                <td style="max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(sha256)}">
+                    ${sha256Cell}
+                </td>
+                <td style="white-space: nowrap;">
+                    ${type ? `<span class="badge badge-secondary"><code style="font-size: 0.75rem;">${escapeHtml(type)}</code></span>` : '<span class="text-muted">-</span>'}
+                </td>
+            </tr>
+            `;
+        }).join('');
+        
+        sections.push(`
+            <div style="margin-bottom: var(--spacing-lg);">
+                ${createSubsectionHeader(`Files Dropped (${items.length})`)}
+                <div class="table-responsive">
+                    <table class="table contacted-table" style="table-layout: auto; width: 100%;">
+                        <thead>
+                            <tr>
+                                <th style="width: 40%;">Path</th>
+                                <th style="width: 50%;">SHA-256</th>
+                                <th style="white-space: nowrap;">Type</th>
+                            </tr>
+                        </thead>
+                        <tbody id="${contentId}">${fileRows}</tbody>
+                    </table>
+                </div>
+                ${items.length > LIMIT ? `<button class="btn-secondary btn-sm" onclick="showAllTableRows('${contentId}', '${dataKey}', 'dropped')" style="margin-top: var(--spacing-sm);">Show ${items.length - LIMIT} more...</button>` : ''}
+            </div>
+        `);
+    }
+    
+    if (sections.length === 0) return '';
+    
+    return createCollapsibleSection(
+        'File System Activity',
+        sections.join(''),
+        `files-${sandboxId}`,
+        false
+    );
+}
+
+/**
+ * Render registry activity section
+ */
+function renderRegistryActivity(attrs, sandboxId) {
+    let sections = [];
+    const LIMIT = 20;
+    
+    if (attrs.registry_keys_opened && attrs.registry_keys_opened.length > 0) {
+        const items = attrs.registry_keys_opened;
+        const dataKey = `registry-opened-${sandboxId}`;
+        window.behaviorDataStore[dataKey] = items.slice(LIMIT);
+        
+        const keyList = items.slice(0, LIMIT).map(key => 
+            `<li><code style="font-size: 0.85rem;">${escapeHtml(key)}</code></li>`
+        ).join('');
+        const showMoreBtn = items.length > LIMIT ?
+            `<button class="btn-secondary btn-sm" onclick="expandList(this, '${dataKey}', 'registry')" style="margin-top: var(--spacing-sm);">Show ${items.length - LIMIT} more...</button>` : '';
+        sections.push(`
+            <div style="margin-bottom: var(--spacing-lg);">
+                ${createSubsectionHeader(`Registry Keys Opened (${items.length})`)}
+                <ul class="simple-list" style="max-height: 300px; overflow-y: auto;">${keyList}</ul>
+                ${showMoreBtn}
+            </div>
+        `);
+    }
+    
+    if (attrs.registry_keys_set && attrs.registry_keys_set.length > 0) {
+        const items = attrs.registry_keys_set;
+        const contentId = `registry-set-${sandboxId}`;
+        const dataKey = contentId + '-data';
+        window.behaviorDataStore[dataKey] = items.slice(LIMIT);
+        
+        const keyRows = items.slice(0, LIMIT).map(item => {
+            const key = item.key || '';
+            const value = item.value || '';
+            const truncatedKey = key.length > 80 ? key.substring(0, 80) + '...' : key;
+            const truncatedValue = value.length > 50 ? value.substring(0, 50) + '...' : value;
+            return `
+            <tr>
+                <td style="max-width: 500px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(key)}">
+                    <code style="font-size: 0.85rem;">${escapeHtml(truncatedKey)}</code>
+                </td>
+                <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(value)}">
+                    <code style="font-size: 0.85rem;">${escapeHtml(truncatedValue)}</code>
+                </td>
+            </tr>
+            `;
+        }).join('');
+        
+        sections.push(`
+            <div style="margin-bottom: var(--spacing-lg);">
+                ${createSubsectionHeader(`Registry Keys Set (${items.length})`)}
+                <div class="table-responsive">
+                    <table class="table contacted-table" style="table-layout: fixed;">
+                        <thead>
+                            <tr>
+                                <th style="width: 60%;">Key</th>
+                                <th style="width: 40%;">Value</th>
+                            </tr>
+                        </thead>
+                        <tbody id="${contentId}">${keyRows}</tbody>
+                    </table>
+                </div>
+                ${items.length > LIMIT ? `<button class="btn-secondary btn-sm" onclick="showAllTableRows('${contentId}', '${dataKey}', 'registryset')" style="margin-top: var(--spacing-sm);">Show ${items.length - LIMIT} more...</button>` : ''}
+            </div>
+        `);
+    }
+    
+    if (attrs.registry_keys_deleted && attrs.registry_keys_deleted.length > 0) {
+        const items = attrs.registry_keys_deleted;
+        const dataKey = `registry-deleted-${sandboxId}`;
+        window.behaviorDataStore[dataKey] = items.slice(LIMIT);
+        
+        const keyList = items.slice(0, LIMIT).map(key => 
+            `<li><code style="font-size: 0.85rem;">${escapeHtml(key)}</code></li>`
+        ).join('');
+        const showMoreBtn = items.length > LIMIT ?
+            `<button class="btn-secondary btn-sm" onclick="expandList(this, '${dataKey}', 'registry')" style="margin-top: var(--spacing-sm);">Show ${items.length - LIMIT} more...</button>` : '';
+        sections.push(`
+            <div style="margin-bottom: var(--spacing-lg);">
+                ${createSubsectionHeader(`Registry Keys Deleted (${items.length})`)}
+                <ul class="simple-list" style="max-height: 300px; overflow-y: auto;">${keyList}</ul>
+                ${showMoreBtn}
+            </div>
+        `);
+    }
+    
+    if (sections.length === 0) return '';
+    
+    return createCollapsibleSection(
+        'Registry Activity',
+        sections.join(''),
+        `registry-${sandboxId}`,
+        false
+    );
+}
+
+/**
+ * Get CSS class for severity
+ */
+function getSeverityClass(severity) {
+    if (!severity) return 'badge-secondary';
+    
+    const sev = severity.toUpperCase();
+    if (sev.includes('HIGH') || sev.includes('CRITICAL')) return 'badge-malicious';
+    if (sev.includes('MEDIUM')) return 'badge-suspicious';
+    if (sev.includes('LOW') || sev.includes('INFO')) return 'badge-info';
+    return 'badge-secondary';
+}
+
+/**
+ * Format severity label
+ */
+function formatSeverity(severity) {
+    if (!severity) return 'N/A';
+    return severity.replace('IMPACT_SEVERITY_', '').replace(/_/g, ' ');
+}
+
+/**
+ * Expand list to show all items
+ */
+window.expandList = function(button, dataKey, type) {
+    const remainingItems = window.behaviorDataStore[dataKey];
+    if (!remainingItems) {
+        console.error('No data found for key:', dataKey);
+        button.remove();
+        return;
+    }
+    
+    const list = button.previousElementSibling;
+    const additionalItems = remainingItems.filter(item => item).map(item => {
+        if (type === 'url') {
+            return `<li><a href="${generateEntityUrl(item, 'url')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(item)}</code></a></li>`;
+        } else if (type === 'ip') {
+            return `<li><a href="${generateEntityUrl(item, 'ip')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(item)}</code></a></li>`;
+        } else {
+            return `<li><code style="font-size: 0.85rem;">${escapeHtml(item)}</code></li>`;
+        }
+    }).join('');
+    list.innerHTML += additionalItems;
+    button.remove();
+};
+
+/**
+ * Show all table rows
+ */
+window.showAllTableRows = function(tableBodyId, dataKey, type) {
+    const remainingItems = window.behaviorDataStore[dataKey];
+    if (!remainingItems) {
+        console.error('No data found for key:', dataKey);
+        return;
+    }
+    
+    const tbody = document.getElementById(tableBodyId);
+    if (!tbody) return;
+    
+    const rows = remainingItems.map(item => {
+        switch(type) {
+            case 'http':
+                const url = item.url || '';
+                const truncatedUrl = url.length > 80 ? url.substring(0, 80) + '...' : url;
+                const httpUrlCell = url
+                    ? `<a href="${generateEntityUrl(url, 'url')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(truncatedUrl)}</code></a>`
+                    : '<span class="text-muted">-</span>';
+                
+                return `<tr>
+                    <td style="width: 80px;"><span class="badge badge-info">${escapeHtml(item.request_method || 'GET')}</span></td>
+                    <td style="max-width: 600px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(url)}">
+                        ${httpUrlCell}
+                    </td>
+                    <td style="width: 80px;">${item.response_status_code || 'N/A'}</td>
+                </tr>`;
+            case 'dns':
+                const dnsHostname = item.hostname || '';
+                const dnsHostnameCell = dnsHostname 
+                    ? `<a href="${generateEntityUrl(dnsHostname, 'domain')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(dnsHostname)}</code></a>`
+                    : '<span class="text-muted">-</span>';
+                
+                const dnsResolvedIpsCell = item.resolved_ips && item.resolved_ips.length > 0
+                    ? item.resolved_ips.filter(ip => ip).map(ip => `<a href="${generateEntityUrl(ip, 'ip')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(ip)}</code></a>`).join(', ')
+                    : '<span class="text-muted">N/A</span>';
+                
+                return `<tr>
+                    <td>${dnsHostnameCell}</td>
+                    <td>${dnsResolvedIpsCell}</td>
+                </tr>`;
+            case 'iptraffic':
+                const ipDestIp = item.destination_ip || '';
+                const ipDestIpCell = ipDestIp
+                    ? `<a href="${generateEntityUrl(ipDestIp, 'ip')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(ipDestIp)}</code></a>`
+                    : '<span class="text-muted">-</span>';
+                
+                return `<tr>
+                    <td>${ipDestIpCell}</td>
+                    <td><code style="font-size: 0.85rem;">${escapeHtml(item.destination_port || '')}</code></td>
+                    <td><code style="font-size: 0.85rem;">${escapeHtml(item.transport_layer_protocol || '')}</code></td>
+                </tr>`;
+            case 'dropped':
+                const path = item.path || '';
+                const sha256 = item.sha256 || '';
+                const type = item.type || '';
+                
+                // Only create link if sha256 is not empty
+                const sha256Cell = sha256 
+                    ? `<a href="${generateEntityUrl(sha256, 'hash')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(sha256)}</code></a>`
+                    : '<span class="text-muted">-</span>';
+                
+                return `<tr>
+                    <td style="max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(path)}">
+                        <code style="font-size: 0.85rem;">${escapeHtml(path)}</code>
+                    </td>
+                    <td style="max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(sha256)}">
+                        ${sha256Cell}
+                    </td>
+                    <td style="white-space: nowrap;">
+                        ${type ? `<span class="badge badge-secondary"><code style="font-size: 0.75rem;">${escapeHtml(type)}</code></span>` : '<span class="text-muted">-</span>'}
+                    </td>
+                </tr>`;
+            case 'registryset':
+                const key = item.key || '';
+                const value = item.value || '';
+                const truncatedKey = key.length > 80 ? key.substring(0, 80) + '...' : key;
+                const truncatedValue = value.length > 50 ? value.substring(0, 50) + '...' : value;
+                return `<tr>
+                    <td style="max-width: 500px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(key)}">
+                        <code style="font-size: 0.85rem;">${escapeHtml(truncatedKey)}</code>
+                    </td>
+                    <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(value)}">
+                        <code style="font-size: 0.85rem;">${escapeHtml(truncatedValue)}</code>
+                    </td>
+                </tr>`;
+            default:
+                return '';
+        }
+    }).join('');
+    
+    tbody.innerHTML += rows;
+    
+    // Remove the "show more" button
+    const button = tbody.parentElement.parentElement.nextElementSibling;
+    if (button && button.tagName === 'BUTTON') {
+        button.remove();
+    }
+};
 
 /**
  * Load submissions data on demand
@@ -3299,7 +4826,16 @@ window.loadSubmissionsData = async function() {
     container.innerHTML = '<div class="loading-spinner" style="margin: 2rem auto;"></div><p class="text-muted text-center">Loading submission history...</p>';
     
     try {
-        const response = await vtClient.getUrlSubmissions(currentId, 40);
+        // Fetch submissions based on entity type
+        let response;
+        if (currentType === 'url') {
+            response = await vtClient.getUrlSubmissions(currentId, 40);
+        } else if (currentType === 'file' || currentType === 'hash') {
+            response = await vtClient.getFileSubmissions(currentId, 40);
+        } else {
+            throw new Error('Unsupported entity type for submissions');
+        }
+        
         const submissions = response.data || [];
         const totalCount = response.meta?.count || submissions.length;
         
@@ -3450,8 +4986,9 @@ function renderSubmissionsTable(submissions, totalCount) {
     const rows = submissions.map(sub => {
         const attrs = sub.attributes;
         
-        // Format date
-        const date = new Date(attrs.date * 1000).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
+        // Format date - short format for display, full format for tooltip
+        const fullDate = new Date(attrs.date * 1000).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
+        const shortDate = formatDateShort(attrs.date);
         
         // Format region with tooltip
         const regionData = formatRegion(attrs);
@@ -3462,7 +4999,7 @@ function renderSubmissionsTable(submissions, totalCount) {
         
         return `
             <tr>
-                <td>${escapeHtml(date)}</td>
+                <td><span title="${escapeHtml(fullDate)}">${shortDate}</span></td>
                 <td title="${escapeHtml(regionData.tooltip)}">${regionData.display}</td>
                 <td style="text-align: center; color: var(--text-muted);">?</td>
                 <td>${escapeHtml(source)}</td>
@@ -4263,6 +5800,371 @@ window.loadIpRelation = async function(relationship, title, sectionId) {
 };
 
 /**
+ * Load file relationship data (generic handler)
+ */
+window.loadFileRelation = async function(sectionId) {
+    // Get the relationship key from the sectionId
+    const relationship = sectionId;
+    const titleEl = document.getElementById(`${sectionId}-title`);
+    
+    // Extract clean title by getting only the direct text nodes (excluding tooltip)
+    let title = sectionId;
+    if (titleEl) {
+        // Clone the element and remove the tooltip to get clean text
+        const clone = titleEl.cloneNode(true);
+        const tooltip = clone.querySelector('.info-tooltip');
+        if (tooltip) tooltip.remove();
+        title = clone.textContent.split('(')[0].trim();
+    }
+    
+    // Find the section content container
+    const section = document.querySelector(`#${sectionId}-title`)?.closest('.expandable-section');
+    if (!section) return;
+    
+    const contentContainer = section.querySelector('.section-content');
+    
+    if (!contentContainer) return;
+    
+    // Show loading
+    contentContainer.innerHTML = '<div class="loading-inline">Loading...</div>';
+    
+    try {
+        // Load appropriate limits for different relationship types
+        const limit = 40;
+        const data = await vtClient.getFileRelationship(currentId, relationship, limit);
+        
+        // Update title with count
+        if (titleEl && data.meta && data.meta.count !== undefined) {
+            const tooltip = titleEl.querySelector('.info-tooltip');
+            const tooltipHtml = tooltip ? tooltip.outerHTML : '';
+            const loaded = data.data ? data.data.length : 0;
+            const total = data.meta.count;
+            
+            if (loaded < total && loaded > 0) {
+                titleEl.innerHTML = `${title} (${loaded}/${total}) ${tooltipHtml}`;
+            } else {
+                titleEl.innerHTML = `${title} (${total}) ${tooltipHtml}`;
+            }
+        }
+        
+        // Render based on relationship type
+        let html = '';
+        let hasResults = false;
+        
+        if (!data || !data.data || data.data.length === 0) {
+            html = '<p class="text-muted">No data found</p>';
+            hasResults = false;
+        } else {
+            hasResults = true;
+            
+            // Determine render method based on relationship type
+            if (relationship.includes('domain')) {
+                html = renderFileRelationDomains(data);
+            } else if (relationship.includes('ip')) {
+                html = renderFileRelationIps(data);
+            } else if (relationship.includes('url')) {
+                html = renderFileRelationUrls(data);
+            } else if (relationship.includes('files') || relationship.includes('parents') || relationship.includes('children')) {
+                html = renderFileRelationFiles(data);
+            } else {
+                html = renderFileRelationGeneric(data, relationship);
+            }
+        }
+        
+        // Grey out title if no results
+        if (titleEl && !hasResults) {
+            const tooltip = titleEl.querySelector('.info-tooltip');
+            const tooltipHtml = tooltip ? tooltip.outerHTML : '';
+            titleEl.innerHTML = `${title} (0) ${tooltipHtml}`;
+            titleEl.classList.add('section-title-grey');
+        } else if (titleEl && hasResults) {
+            titleEl.classList.remove('section-title-grey');
+        }
+        
+        contentContainer.innerHTML = html;
+        
+    } catch (error) {
+        console.error(`Error loading ${relationship}:`, error);
+        contentContainer.innerHTML = `<p class="text-error">Error loading data: ${escapeHtml(error.message)}</p>`;
+    }
+};
+
+/**
+ * Render file relation domains (contacted, embedded, ITW domains)
+ */
+function renderFileRelationDomains(data) {
+    if (!data.data || data.data.length === 0) {
+        return '<p class="text-muted">No domains found</p>';
+    }
+    
+    const rows = data.data.map(item => {
+        const domain = item.id || item.attributes?.domain_name || 'Unknown';
+        const detections = item.attributes?.last_analysis_stats;
+        
+        // Format detection text with colored numbers
+        let detectionText = 'N/A';
+        if (detections) {
+            const malicious = detections.malicious || 0;
+            const total = detections.malicious + detections.suspicious + detections.harmless + detections.undetected;
+            const color = malicious > 0 ? 'var(--red)' : 'var(--green)';
+            detectionText = `<span style="color: ${color}">${malicious}</span> / ${total}`;
+        }
+        
+        // Creation date - use formatDateShort for YYYY-MM-DD format
+        const creationDate = item.attributes?.creation_date 
+            ? formatDateShort(item.attributes.creation_date)
+            : '-';
+        
+        // Registrar
+        const registrar = item.attributes?.registrar || '-';
+        
+        return `
+            <tr>
+                <td><a href="result.html?type=domain&id=${encodeURIComponent(domain)}" class="domain-link">${escapeHtml(domain)}</a></td>
+                <td>${detectionText}</td>
+                <td>${creationDate}</td>
+                <td>${escapeHtml(registrar)}</td>
+            </tr>
+        `;
+    }).join('');
+    
+    return `
+        <table class="table contacted-table">
+            <thead>
+                <tr>
+                    <th>Domain</th>
+                    <th>Detections</th>
+                    <th>Created</th>
+                    <th>Registrar</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+    `;
+}
+
+/**
+ * Render file relation IPs (contacted, embedded, ITW IPs)
+ */
+function renderFileRelationIps(data) {
+    if (!data.data || data.data.length === 0) {
+        return '<p class="text-muted">No IP addresses found</p>';
+    }
+    
+    const rows = data.data.map(item => {
+        const ip = item.id || item.attributes?.ip_address || 'Unknown';
+        const detections = item.attributes?.last_analysis_stats;
+        
+        // Format detection text with colored numbers
+        let detectionText = 'N/A';
+        if (detections) {
+            const malicious = detections.malicious || 0;
+            const total = detections.malicious + detections.suspicious + detections.harmless + detections.undetected;
+            const color = malicious > 0 ? 'var(--red)' : 'var(--green)';
+            detectionText = `<span style="color: ${color}">${malicious}</span> / ${total}`;
+        }
+        
+        // Autonomous System
+        const asn = item.attributes?.asn ? `AS${item.attributes.asn}` : '-';
+        
+        // Country
+        const country = item.attributes?.country || '-';
+        
+        // Last analysis date - use formatDateShort for YYYY-MM-DD format
+        const lastAnalysisDate = item.attributes?.last_analysis_date 
+            ? formatDateShort(item.attributes.last_analysis_date)
+            : '-';
+        
+        return `
+            <tr>
+                <td><a href="result.html?type=ip&id=${encodeURIComponent(ip)}" class="ip-link">${escapeHtml(ip)}</a></td>
+                <td>${detectionText}</td>
+                <td>${escapeHtml(asn)}</td>
+                <td>${escapeHtml(country)}</td>
+                <td>${lastAnalysisDate}</td>
+            </tr>
+        `;
+    }).join('');
+    
+    return `
+        <table class="table contacted-table">
+            <thead>
+                <tr>
+                    <th>IP Address</th>
+                    <th>Detections</th>
+                    <th>Autonomous System</th>
+                    <th>Country</th>
+                    <th>Last Analysis Date</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+    `;
+}
+
+/**
+ * Render file relation URLs (contacted, embedded, ITW URLs)
+ */
+function renderFileRelationUrls(data) {
+    if (!data.data || data.data.length === 0) {
+        return '<p class="text-muted">No URLs found</p>';
+    }
+    
+    const rows = data.data.map(item => {
+        const url = item.attributes?.url || item.id || 'Unknown';
+        const encodedUrl = item.id;
+        const detections = item.attributes?.last_analysis_stats;
+        
+        // Format detection text with colored numbers
+        let detectionText = 'N/A';
+        if (detections) {
+            const malicious = detections.malicious || 0;
+            const total = detections.malicious + detections.suspicious + detections.harmless + detections.undetected;
+            const color = malicious > 0 ? 'var(--red)' : 'var(--green)';
+            detectionText = `<span style="color: ${color}">${malicious}</span> / ${total}`;
+        }
+        
+        // Scanned date (last analysis) - use formatDateShort for YYYY-MM-DD format
+        const scannedDate = item.attributes?.last_analysis_date 
+            ? formatDateShort(item.attributes.last_analysis_date)
+            : '-';
+        
+        // HTTP Status
+        const httpStatus = item.attributes?.last_http_response_code || '-';
+        
+        // First seen date
+        const firstSeenDate = item.attributes?.first_submission_date 
+            ? formatDateShort(item.attributes.first_submission_date)
+            : '-';
+        
+        return `
+            <tr>
+                <td>${scannedDate}</td>
+                <td>${detectionText}</td>
+                <td>${escapeHtml(String(httpStatus))}</td>
+                <td><a href="result.html?type=url&id=${encodedUrl}" class="url-link">${escapeHtml(url)}</a></td>
+                <td>${firstSeenDate}</td>
+            </tr>
+        `;
+    }).join('');
+    
+    return `
+        <table class="table contacted-table">
+            <thead>
+                <tr>
+                    <th>Scanned</th>
+                    <th>Detections</th>
+                    <th>Status</th>
+                    <th>URL</th>
+                    <th>First Seen</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+    `;
+}
+
+/**
+ * Render file relation files (dropped, execution parents, similar files, etc.)
+ */
+function renderFileRelationFiles(data) {
+    if (!data.data || data.data.length === 0) {
+        return '<p class="text-muted">No files found</p>';
+    }
+    
+    const rows = data.data.map(item => {
+        const hash = item.id || 'Unknown';
+        // Use full hash as filename if no meaningful name is available
+        const fullFilename = item.attributes?.meaningful_name || item.attributes?.names?.[0] || hash;
+        
+        // Truncate long filenames but keep them in title for hover
+        const maxLength = 60;
+        const displayFilename = fullFilename.length > maxLength 
+            ? fullFilename.substring(0, maxLength) + '...'
+            : fullFilename;
+        
+        const detections = item.attributes?.last_analysis_stats;
+        
+        // Format detection text with colored numbers
+        let detectionText = 'N/A';
+        if (detections) {
+            const malicious = detections.malicious || 0;
+            const total = detections.malicious + detections.suspicious + detections.harmless + detections.undetected;
+            const color = malicious > 0 ? 'var(--red)' : 'var(--green)';
+            detectionText = `<span style="color: ${color}">${malicious}</span> / ${total}`;
+        }
+        
+        const fileType = item.attributes?.type_description || item.attributes?.type_tag || '';
+        const size = item.attributes?.size ? formatFileSize(item.attributes.size) : '';
+        
+        // Last analysis date - use formatDateShort for YYYY-MM-DD format
+        const lastAnalysisDate = item.attributes?.last_analysis_date 
+            ? formatDateShort(item.attributes.last_analysis_date)
+            : '-';
+        
+        // First seen date - use formatDateShort for YYYY-MM-DD format
+        const firstSeenDate = item.attributes?.first_submission_date 
+            ? formatDateShort(item.attributes.first_submission_date)
+            : '-';
+        
+        return `
+            <tr>
+                <td><a href="result.html?type=file&id=${encodeURIComponent(hash)}" class="file-link" title="${escapeHtml(fullFilename)}">${escapeHtml(displayFilename)}</a></td>
+                <td>${escapeHtml(fileType)}</td>
+                <td>${escapeHtml(size)}</td>
+                <td>${detectionText}</td>
+                <td>${lastAnalysisDate}</td>
+                <td>${firstSeenDate}</td>
+            </tr>
+        `;
+    }).join('');
+    
+    return `
+        <table class="table contacted-table">
+            <thead>
+                <tr>
+                    <th>Filename</th>
+                    <th>Type</th>
+                    <th>Size</th>
+                    <th>Detections</th>
+                    <th>Last Analysis</th>
+                    <th>First Seen</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+    `;
+}
+
+/**
+ * Render generic file relations
+ */
+function renderFileRelationGeneric(data, relationship) {
+    if (!data.data || data.data.length === 0) {
+        return '<p class="text-muted">No data found</p>';
+    }
+    
+    // Try to render based on data type
+    const firstItem = data.data[0];
+    if (firstItem.type === 'domain') {
+        return renderFileRelationDomains(data);
+    } else if (firstItem.type === 'ip_address') {
+        return renderFileRelationIps(data);
+    } else if (firstItem.type === 'url') {
+        return renderFileRelationUrls(data);
+    } else if (firstItem.type === 'file') {
+        return renderFileRelationFiles(data);
+    }
+    
+    // Fallback: simple list
+    const items = data.data.map(item => `
+        <li>${escapeHtml(item.id || JSON.stringify(item).substring(0, 100))}</li>
+    `).join('');
+    
+    return `<ul class="simple-list">${items}</ul>`;
+}
+
+/**
  * Load domain relationship data (generic handler)
  */
 window.loadDomainRelation = async function(relationship, title, sectionId) {
@@ -4398,6 +6300,49 @@ window.loadAllDomainRelations = async function() {
 };
 
 /**
+ * Load all file relations at once
+ */
+window.loadAllFileRelations = async function() {
+    const relationships = [
+        'execution_parents',
+        'contacted_domains',
+        'contacted_ips',
+        'contacted_urls',
+        'dropped_files',
+        'embedded_domains',
+        'embedded_ips',
+        'embedded_urls',
+        'memory_pattern_domains',
+        'memory_pattern_ips',
+        'memory_pattern_urls',
+        'itw_domains',
+        'itw_ips',
+        'itw_urls',
+        'pcap_parents',
+        'pcap_children',
+        'pe_resource_children',
+        'pe_resource_parents',
+        'similar_files',
+        'compressed_parents',
+        'bundled_files'
+    ];
+    
+    showToast('Loading all file relations...', 'info');
+    
+    // Load all relationships in parallel
+    const loadPromises = relationships.map(async (rel) => {
+        try {
+            await window.loadFileRelation(rel);
+        } catch (error) {
+            console.error(`Failed to load ${rel}:`, error);
+        }
+    });
+    
+    await Promise.all(loadPromises);
+    showToast('All file relations loaded', 'success');
+};
+
+/**
  * Render IP URLs table
  */
 function renderIpUrls(data) {
@@ -4426,7 +6371,7 @@ function renderIpUrls(data) {
             <td>${scannedDate}</td>
             <td class="${detectionClass}">${malicious} / ${total}</td>
             <td>${escapeHtml(String(status))}</td>
-            <td><a href="result.html?type=url&id=${encodeURIComponent(item.id)}" target="_blank">${escapeHtml(url)}</a></td>
+            <td><a href="result.html?type=url&id=${item.id}" target="_blank">${escapeHtml(url)}</a></td>
         </tr>`;
     });
     
@@ -5323,6 +7268,36 @@ window.toggleWhoisFull = function(index) {
         container.classList.add('hidden');
         button.textContent = 'View Full Record';
     }
+};
+
+// ==================== Navigation from Behavior Links ====================
+
+/**
+ * Generate URL for entity search
+ * @param {string} input - The entity value (IP, domain, URL, hash)
+ * @param {string} type - The entity type
+ * @returns {string} The generated URL
+ */
+window.generateEntityUrl = function(input, type) {
+    if (!input || !type) {
+        console.error('Invalid search entity:', input, type);
+        return '#';
+    }
+    
+    let id = input;
+    
+    // For URLs, encode them
+    if (type === 'url') {
+        try {
+            id = encodeUrlForVT(input);
+        } catch (error) {
+            console.error('Failed to encode URL:', error);
+            return '#';
+        }
+    }
+    
+    // Generate results page URL with parameters
+    return `result.html?type=${type}&id=${encodeURIComponent(id)}`;
 };
 
 // ==================== Start Application ====================
