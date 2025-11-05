@@ -71,7 +71,7 @@ jobs:
           # If no changes after filtering, get the actual feature commits
           if [ -z "$CHANGELOG" ]; then
             echo "No feature commits found, getting all commits between tags..."
-            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges $PREVIOUS_TAG..HEAD^ | head -20)
+            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges $PREVIOUS_TAG..HEAD | head -20)
           fi
           
           echo "changelog<<EOF" >> $GITHUB_OUTPUT
