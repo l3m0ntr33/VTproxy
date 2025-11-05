@@ -4272,7 +4272,7 @@ function renderNetworkActivity(attrs, sandboxId) {
         window.behaviorDataStore[dataKey] = items.slice(LIMIT);
         
         const urlList = items.slice(0, LIMIT).filter(url => url).map(url => 
-            `<li><a href="${generateEntityUrl(url, 'url')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(url)}</code></a></li>`
+            `<li><a href="${generateEntityUrl(url, 'url')}" class="link"><code style="font-size: 0.85rem;">${escapeHtml(url)}</code></a></li>`
         ).join('');
         const showMoreBtn = items.length > LIMIT ? 
             `<button class="btn-secondary btn-sm" onclick="expandList(this, '${dataKey}', 'url')" style="margin-top: var(--spacing-sm);">Show ${items.length - LIMIT} more...</button>` : '';
@@ -4291,7 +4291,7 @@ function renderNetworkActivity(attrs, sandboxId) {
         window.behaviorDataStore[dataKey] = items.slice(LIMIT);
         
         const ipList = items.slice(0, LIMIT).filter(ip => ip).map(ip => 
-            `<li><a href="${generateEntityUrl(ip, 'ip')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(ip)}</code></a></li>`
+            `<li><a href="${generateEntityUrl(ip, 'ip')}" class="link"><code style="font-size: 0.85rem;">${escapeHtml(ip)}</code></a></li>`
         ).join('');
         const showMoreBtn = items.length > LIMIT ?
             `<button class="btn-secondary btn-sm" onclick="expandList(this, '${dataKey}', 'ip')" style="margin-top: var(--spacing-sm);">Show ${items.length - LIMIT} more...</button>` : '';
@@ -4315,7 +4315,7 @@ function renderNetworkActivity(attrs, sandboxId) {
             const url = http.url || '';
             const truncatedUrl = url.length > 80 ? url.substring(0, 80) + '...' : url;
             const urlCell = url
-                ? `<a href="${generateEntityUrl(url, 'url')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(truncatedUrl)}</code></a>`
+                ? `<a href="${generateEntityUrl(url, 'url')}" class="link"><code style="font-size: 0.85rem;">${escapeHtml(truncatedUrl)}</code></a>`
                 : '<span class="text-muted">-</span>';
             
             return `
@@ -4359,11 +4359,11 @@ function renderNetworkActivity(attrs, sandboxId) {
         const dnsRows = items.slice(0, LIMIT).map(dns => {
             const hostname = dns.hostname || '';
             const hostnameCell = hostname 
-                ? `<a href="${generateEntityUrl(hostname, 'domain')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(hostname)}</code></a>`
+                ? `<a href="${generateEntityUrl(hostname, 'domain')}" class="link"><code style="font-size: 0.85rem;">${escapeHtml(hostname)}</code></a>`
                 : '<span class="text-muted">-</span>';
             
             const resolvedIpsCell = dns.resolved_ips && dns.resolved_ips.length > 0
-                ? dns.resolved_ips.filter(ip => ip).map(ip => `<a href="${generateEntityUrl(ip, 'ip')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(ip)}</code></a>`).join(', ')
+                ? dns.resolved_ips.filter(ip => ip).map(ip => `<a href="${generateEntityUrl(ip, 'ip')}" class="link"><code style="font-size: 0.85rem;">${escapeHtml(ip)}</code></a>`).join(', ')
                 : '<span class="text-muted">N/A</span>';
             
             return `
@@ -4403,7 +4403,7 @@ function renderNetworkActivity(attrs, sandboxId) {
         const ipRows = items.slice(0, LIMIT).map(traffic => {
             const destIp = traffic.destination_ip || '';
             const ipCell = destIp
-                ? `<a href="${generateEntityUrl(destIp, 'ip')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(destIp)}</code></a>`
+                ? `<a href="${generateEntityUrl(destIp, 'ip')}" class="link"><code style="font-size: 0.85rem;">${escapeHtml(destIp)}</code></a>`
                 : '<span class="text-muted">-</span>';
             
             return `
@@ -4522,7 +4522,7 @@ function renderFilesActivity(attrs, sandboxId) {
             
             // Only create link if sha256 is not empty
             const sha256Cell = sha256 
-                ? `<a href="${generateEntityUrl(sha256, 'hash')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(sha256)}</code></a>`
+                ? `<a href="${generateEntityUrl(sha256, 'hash')}" class="link"><code style="font-size: 0.85rem;">${escapeHtml(sha256)}</code></a>`
                 : '<span class="text-muted">-</span>';
             
             return `
@@ -4702,9 +4702,9 @@ window.expandList = function(button, dataKey, type) {
     const list = button.previousElementSibling;
     const additionalItems = remainingItems.filter(item => item).map(item => {
         if (type === 'url') {
-            return `<li><a href="${generateEntityUrl(item, 'url')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(item)}</code></a></li>`;
+            return `<li><a href="${generateEntityUrl(item, 'url')}" class="link"><code style="font-size: 0.85rem;">${escapeHtml(item)}</code></a></li>`;
         } else if (type === 'ip') {
-            return `<li><a href="${generateEntityUrl(item, 'ip')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(item)}</code></a></li>`;
+            return `<li><a href="${generateEntityUrl(item, 'ip')}" class="link"><code style="font-size: 0.85rem;">${escapeHtml(item)}</code></a></li>`;
         } else {
             return `<li><code style="font-size: 0.85rem;">${escapeHtml(item)}</code></li>`;
         }
@@ -4732,7 +4732,7 @@ window.showAllTableRows = function(tableBodyId, dataKey, type) {
                 const url = item.url || '';
                 const truncatedUrl = url.length > 80 ? url.substring(0, 80) + '...' : url;
                 const httpUrlCell = url
-                    ? `<a href="${generateEntityUrl(url, 'url')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(truncatedUrl)}</code></a>`
+                    ? `<a href="${generateEntityUrl(url, 'url')}" class="link"><code style="font-size: 0.85rem;">${escapeHtml(truncatedUrl)}</code></a>`
                     : '<span class="text-muted">-</span>';
                 
                 return `<tr>
@@ -4745,11 +4745,11 @@ window.showAllTableRows = function(tableBodyId, dataKey, type) {
             case 'dns':
                 const dnsHostname = item.hostname || '';
                 const dnsHostnameCell = dnsHostname 
-                    ? `<a href="${generateEntityUrl(dnsHostname, 'domain')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(dnsHostname)}</code></a>`
+                    ? `<a href="${generateEntityUrl(dnsHostname, 'domain')}" class="link"><code style="font-size: 0.85rem;">${escapeHtml(dnsHostname)}</code></a>`
                     : '<span class="text-muted">-</span>';
                 
                 const dnsResolvedIpsCell = item.resolved_ips && item.resolved_ips.length > 0
-                    ? item.resolved_ips.filter(ip => ip).map(ip => `<a href="${generateEntityUrl(ip, 'ip')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(ip)}</code></a>`).join(', ')
+                    ? item.resolved_ips.filter(ip => ip).map(ip => `<a href="${generateEntityUrl(ip, 'ip')}" class="link"><code style="font-size: 0.85rem;">${escapeHtml(ip)}</code></a>`).join(', ')
                     : '<span class="text-muted">N/A</span>';
                 
                 return `<tr>
@@ -4759,7 +4759,7 @@ window.showAllTableRows = function(tableBodyId, dataKey, type) {
             case 'iptraffic':
                 const ipDestIp = item.destination_ip || '';
                 const ipDestIpCell = ipDestIp
-                    ? `<a href="${generateEntityUrl(ipDestIp, 'ip')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(ipDestIp)}</code></a>`
+                    ? `<a href="${generateEntityUrl(ipDestIp, 'ip')}" class="link"><code style="font-size: 0.85rem;">${escapeHtml(ipDestIp)}</code></a>`
                     : '<span class="text-muted">-</span>';
                 
                 return `<tr>
@@ -4774,7 +4774,7 @@ window.showAllTableRows = function(tableBodyId, dataKey, type) {
                 
                 // Only create link if sha256 is not empty
                 const sha256Cell = sha256 
-                    ? `<a href="${generateEntityUrl(sha256, 'hash')}" target="_blank" class="link"><code style="font-size: 0.85rem;">${escapeHtml(sha256)}</code></a>`
+                    ? `<a href="${generateEntityUrl(sha256, 'hash')}" class="link"><code style="font-size: 0.85rem;">${escapeHtml(sha256)}</code></a>`
                     : '<span class="text-muted">-</span>';
                 
                 return `<tr>
@@ -6371,7 +6371,7 @@ function renderIpUrls(data) {
             <td>${scannedDate}</td>
             <td class="${detectionClass}">${malicious} / ${total}</td>
             <td>${escapeHtml(String(status))}</td>
-            <td><a href="result.html?type=url&id=${item.id}" target="_blank">${escapeHtml(url)}</a></td>
+            <td><a href="result.html?type=url&id=${item.id}">${escapeHtml(url)}</a></td>
         </tr>`;
     });
     
@@ -6406,7 +6406,7 @@ function renderIpResolutions(data) {
             <td>${dateResolved}</td>
             <td class="${detectionClass}">${malicious} / ${total}</td>
             <td>${escapeHtml(resolver)}</td>
-            <td><a href="result.html?type=domain&id=${encodeURIComponent(hostName)}" target="_blank">${escapeHtml(hostName)}</a></td>
+            <td><a href="result.html?type=domain&id=${encodeURIComponent(hostName)}">${escapeHtml(hostName)}</a></td>
         </tr>`;
     });
     
@@ -6441,7 +6441,7 @@ function renderIpFiles(data) {
             <td>${scannedDate}</td>
             <td class="${detectionClass}">${malicious} / ${total}</td>
             <td>${escapeHtml(fileType)}</td>
-            <td><a href="result.html?type=file&id=${item.id}" target="_blank" title="${item.id}">${escapeHtml(fileName)}</a></td>
+            <td><a href="result.html?type=file&id=${item.id}" title="${item.id}">${escapeHtml(fileName)}</a></td>
         </tr>`;
     });
     
